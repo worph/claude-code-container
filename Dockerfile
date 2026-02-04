@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y \
     supervisor \
     ca-certificates \
     gnupg \
+    sudo \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Docker CLI (for optional Docker socket access)
@@ -38,7 +39,8 @@ RUN git clone https://github.com/tsl0922/ttyd.git /tmp/ttyd && \
 RUN groupadd -g 999 docker || true && \
     useradd -m -s /bin/bash -G docker claude && \
     mkdir -p /home/claude/workspace && \
-    chown -R claude:claude /home/claude
+    chown -R claude:claude /home/claude && \
+    echo "claude ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 # Install Claude Code using native installer (as claude user)
 USER claude
