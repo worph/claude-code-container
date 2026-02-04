@@ -25,9 +25,8 @@ services:
       - workspace:/home/claude/workspace
 
       # --- DOCKER ACCESS ---
-      # Uncomment below to give Claude Code access to Docker
       # WARNING: This gives the container full control over Docker on the host
-      # - /var/run/docker.sock:/var/run/docker.sock
+      - /var/run/docker.sock:/var/run/docker.sock
 
     restart: unless-stopped
 
