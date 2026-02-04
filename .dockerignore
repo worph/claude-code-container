@@ -1,0 +1,25 @@
+# Git
+.git
+.gitignore
+
+# Environment files
+.env
+.env.*
+
+# Documentation
+README.md
+LICENSE
+
+# IDE
+.vscode/
+.idea/
+
+# Node modules (will be installed in container)
+node_modules/
+
+# Docker files not needed in build context
+docker-compose*.yml
+
+# OS files
+.DS_Store
+Thumbs.db

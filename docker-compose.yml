@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  claude-code:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    # --- NETWORK MODE ---
+    # Option 1: Bridge mode (default) - use ports mapping
+    ports:
+      - "8080:8080"
+
+    # Option 2: Host mode - uncomment below and comment out 'ports' above
+    # network_mode: host
+
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - AUTH_PASSWORD=${AUTH_PASSWORD}
+      - PROXY_PORT=8080
+      - TTYD_PORT=7681
+      - TTYD_URL=http://localhost:7681
+
+    volumes:
+      - workspace:/home/claude/workspace
+
+      # --- DOCKER ACCESS ---
+      # Uncomment below to give Claude Code access to Docker
+      # WARNING: This gives the container full control over Docker on the host
+      # - /var/run/docker.sock:/var/run/docker.sock
+
+    restart: unless-stopped
+
+volumes:
+  workspace:

@@ -1,0 +1,12 @@
+{
+  "name": "claude-code-auth-proxy",
+  "version": "1.0.0",
+  "description": "Authentication proxy for Claude Code terminal",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "http-proxy": "^1.18.1"
+  }
+}

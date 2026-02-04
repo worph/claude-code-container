@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker compose:*)",
+      "Bash(AUTH_PASSWORD=testpass123 docker compose:*)",
+      "Bash(curl:*)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "WebSearch"
+    ]
+  }
+}
