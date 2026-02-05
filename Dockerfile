@@ -26,7 +26,7 @@ RUN install -m 0755 -d /etc/apt/keyrings && \
     rm -rf /var/lib/apt/lists/*
 
 # Build ttyd from source for latest version
-RUN git clone https://github.com/tsl0922/ttyd.git /tmp/ttyd && \
+RUN git clone --branch 1.7.7 --depth 1 https://github.com/tsl0922/ttyd.git /tmp/ttyd && \
     cd /tmp/ttyd && \
     mkdir build && cd build && \
     cmake .. && \
@@ -74,5 +74,8 @@ ENV AUTH_PASSWORD=""
 ENV PROXY_PORT=8080
 ENV TTYD_PORT=7681
 ENV TTYD_URL=http://localhost:7681
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:${PROXY_PORT:-8080}/login || exit 1
 
 ENTRYPOINT ["/entrypoint.sh"]

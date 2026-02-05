@@ -16,7 +16,7 @@ A Docker container that runs [Claude Code](https://github.com/anthropics/claude-
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/claude-code-container.git
+git clone https://github.com/worph/claude-code-container.git
 cd claude-code-container
 ```
 
@@ -91,16 +91,13 @@ services:
 
 ### Docker Access
 
-Give Claude Code access to Docker on the host machine. Edit `docker-compose.yml`:
+The Docker socket is mounted by default in `docker-compose.yml` to give Claude Code access to Docker on the host. To disable it, comment out the bind mount:
 
 ```yaml
-services:
-  claude-code:
-    # ...
-    volumes:
-      - workspace:/home/claude/workspace
-      # Uncomment to enable Docker access
-      - /var/run/docker.sock:/var/run/docker.sock
+volumes:
+  - workspace:/home/claude/workspace
+  - claude-config:/home/claude/.claude
+  # - /var/run/docker.sock:/var/run/docker.sock
 ```
 
 > **Warning**: Mounting the Docker socket gives the container full control over Docker on your host. Only enable this if you trust the environment and need Docker capabilities.
@@ -116,7 +113,7 @@ docker build -t claude-code-container .
 Images are automatically built and pushed to GitHub Container Registry:
 
 ```bash
-docker pull ghcr.io/YOUR_USERNAME/claude-code-container:main
+docker pull ghcr.io/worph/claude-code-container:main
 ```
 
 ## Security Considerations
@@ -151,9 +148,11 @@ services:
 ├── docker-compose.yml
 ├── entrypoint.sh
 ├── supervisord.conf
+├── .env.example
 ├── auth-proxy/
 │   ├── server.js
-│   └── package.json
+│   ├── package.json
+│   └── package-lock.json
 └── .github/
     └── workflows/
         └── docker-build.yml

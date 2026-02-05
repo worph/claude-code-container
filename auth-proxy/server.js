@@ -7,10 +7,40 @@ const crypto = require('crypto');
 const PORT = process.env.PROXY_PORT || 8080;
 const TTYD_URL = process.env.TTYD_URL || 'http://localhost:7681';
 const AUTH_PASSWORD = process.env.AUTH_PASSWORD || '';
-const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 
 // Simple session store (in-memory)
 const sessions = new Map();
+
+// Rate limiting for login attempts (per IP)
+const loginAttempts = new Map();
+const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const MAX_LOGIN_ATTEMPTS = 5;
+
+function isRateLimited(ip) {
+    const now = Date.now();
+    const record = loginAttempts.get(ip);
+    if (!record) return false;
+    // Clean up expired window
+    if (now - record.firstAttempt > RATE_LIMIT_WINDOW_MS) {
+        loginAttempts.delete(ip);
+        return false;
+    }
+    return record.count >= MAX_LOGIN_ATTEMPTS;
+}
+
+function recordLoginAttempt(ip) {
+    const now = Date.now();
+    const record = loginAttempts.get(ip);
+    if (!record || now - record.firstAttempt > RATE_LIMIT_WINDOW_MS) {
+        loginAttempts.set(ip, { count: 1, firstAttempt: now });
+    } else {
+        record.count++;
+    }
+}
+
+function clearLoginAttempts(ip) {
+    loginAttempts.delete(ip);
+}
 
 // Create proxy
 const proxy = httpProxy.createProxyServer({
@@ -215,9 +245,18 @@ const server = http.createServer(async (req, res) => {
 
     // Handle authentication
     if (url.pathname === '/auth' && req.method === 'POST') {
+        const clientIp = req.socket.remoteAddress;
+
+        if (isRateLimited(clientIp)) {
+            res.writeHead(429, { 'Content-Type': 'text/plain' });
+            res.end('Too many login attempts. Try again later.');
+            return;
+        }
+
         const body = await parseBody(req);
 
         if (body.password === AUTH_PASSWORD) {
+            clearLoginAttempts(clientIp);
             const sessionId = generateSessionId();
             sessions.set(sessionId, {
                 expires: Date.now() + (24 * 60 * 60 * 1000) // 24 hours
@@ -229,6 +268,7 @@ const server = http.createServer(async (req, res) => {
             });
             res.end();
         } else {
+            recordLoginAttempt(clientIp);
             res.writeHead(302, { 'Location': '/login?error=1' });
             res.end();
         }
