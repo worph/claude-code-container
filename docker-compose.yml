@@ -23,6 +23,7 @@ services:
 
     volumes:
       - workspace:/home/claude/workspace
+      - claude-config:/home/claude/.claude
 
       # --- DOCKER ACCESS ---
       # WARNING: This gives the container full control over Docker on the host
@@ -32,3 +33,4 @@ services:
 
 volumes:
   workspace:
+  claude-config:

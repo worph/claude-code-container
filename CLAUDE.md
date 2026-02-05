@@ -81,6 +81,19 @@ Browser → :8080 Auth Proxy (Node.js) → :7681 ttyd → Claude Code CLI
 | `PROXY_PORT` | No | Auth proxy port (default: 8080) |
 | `TTYD_PORT` | No | Internal ttyd port (default: 7681) |
 
+## Data Persistence
+
+The following volumes should be mounted to preserve data across container restarts:
+
+| Volume Mount | Purpose |
+|---|---|
+| `/home/claude/workspace` | Working directory for projects and files |
+| `/home/claude/.claude` | Claude Code settings, chat/conversation history, and project metadata |
+
+Both are configured as named volumes in `docker-compose.yml` by default.
+
+**Note:** Auth proxy sessions are stored in-memory and will be lost on container restart — you'll need to log in again after a restart. This is by design and cannot be solved with a volume mount.
+
 ## Container Details
 
 - Non-root user: `claude` (UID 999)
