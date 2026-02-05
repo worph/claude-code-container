@@ -13,6 +13,11 @@ fi
 # Create log directory
 mkdir -p /var/log/supervisor
 
+# Ensure mounted volumes are owned by the claude user
+# Named volumes may be created as root, preventing claude from writing config/history
+mkdir -p /home/claude/.claude
+chown -R claude:claude /home/claude/.claude /home/claude/workspace
+
 echo "Starting Claude Code Terminal with authentication proxy..."
 echo "Access the terminal at http://localhost:${PROXY_PORT:-8080}"
 
