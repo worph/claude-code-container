@@ -14,7 +14,22 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     gnupg \
     sudo \
+    jq \
+    htop \
+    dnsutils \
+    iproute2 \
+    iputils-ping \
+    traceroute \
+    lsof \
+    openssh-client \
+    ncdu \
+    rsync \
+    python3 \
     && rm -rf /var/lib/apt/lists/*
+
+# Install yq (YAML processor)
+RUN curl -fsSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_$(dpkg --print-architecture) -o /usr/local/bin/yq \
+    && chmod +x /usr/local/bin/yq
 
 # Install Docker CLI (for optional Docker socket access)
 RUN install -m 0755 -d /etc/apt/keyrings && \
