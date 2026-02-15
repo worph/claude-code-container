@@ -16,6 +16,40 @@ const loginAttempts = new Map();
 const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 const MAX_LOGIN_ATTEMPTS = 5;
 
+// Cleanup intervals
+const SESSION_CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+const RATE_LIMIT_CLEANUP_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
+
+// Periodic cleanup for expired sessions
+setInterval(() => {
+    const now = Date.now();
+    let cleanedCount = 0;
+    for (const [sessionId, session] of sessions) {
+        if (session.expires <= now) {
+            sessions.delete(sessionId);
+            cleanedCount++;
+        }
+    }
+    if (cleanedCount > 0) {
+        console.log(`Cleaned up ${cleanedCount} expired sessions. Active sessions: ${sessions.size}`);
+    }
+}, SESSION_CLEANUP_INTERVAL_MS);
+
+// Periodic cleanup for expired rate limit records
+setInterval(() => {
+    const now = Date.now();
+    let cleanedCount = 0;
+    for (const [ip, record] of loginAttempts) {
+        if (now - record.firstAttempt > RATE_LIMIT_WINDOW_MS) {
+            loginAttempts.delete(ip);
+            cleanedCount++;
+        }
+    }
+    if (cleanedCount > 0) {
+        console.log(`Cleaned up ${cleanedCount} expired rate limit records. Active records: ${loginAttempts.size}`);
+    }
+}, RATE_LIMIT_CLEANUP_INTERVAL_MS);
+
 function isRateLimited(ip) {
     const now = Date.now();
     const record = loginAttempts.get(ip);
