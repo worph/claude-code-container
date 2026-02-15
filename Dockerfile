@@ -25,6 +25,7 @@ RUN apt-get update && apt-get install -y \
     ncdu \
     rsync \
     python3 \
+    tmux \
     && rm -rf /var/lib/apt/lists/*
 
 # Install yq (YAML processor)
