@@ -21,7 +21,10 @@ services:
 
     volumes:
       - workspace:/home/claude/workspace
+      # Claude config directory (credentials, settings, history)
       - ./claude-config:/home/claude/.claude
+      # Claude session state file (required for auth persistence)
+      - ./claude-config/.claude.json:/home/claude/.claude.json
 
       # --- DOCKER ACCESS ---
       # WARNING: This gives the container full control over Docker on the host

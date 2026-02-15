@@ -76,23 +76,31 @@ Browser → :8080 Auth Proxy (Node.js) → :7681 ttyd → Claude Code CLI
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `ANTHROPIC_API_KEY` | Yes | Claude API key |
-| `AUTH_PASSWORD` | Yes | Login password |
+| `ANTHROPIC_API_KEY` | No | Claude API key. Leave empty to use subscription auth (OAuth) |
+| `AUTH_PASSWORD` | Yes | Login password for web terminal |
 | `PROXY_PORT` | No | Auth proxy port (default: 8080) |
 | `TTYD_PORT` | No | Internal ttyd port (default: 7681) |
 
 ## Data Persistence
 
-The following volumes should be mounted to preserve data across container restarts:
+Claude Code stores configuration in **two locations** that must both be persisted:
 
 | Volume Mount | Purpose |
 |---|---|
 | `/home/claude/workspace` | Working directory for projects and files |
-| `/home/claude/.claude` | Claude Code settings, chat/conversation history, and project metadata |
+| `/home/claude/.claude` | Directory containing credentials, settings, history, and project metadata |
+| `/home/claude/.claude.json` | Session state file containing account info and feature flags |
 
-Both are configured as named volumes in `docker-compose.yml` by default.
+**Important:** Both `.claude/` directory AND `.claude.json` file must be mounted for authentication to persist across container restarts. Missing the `.claude.json` file will cause Claude Code to ask for re-authentication on every restart.
 
-**Note:** Auth proxy sessions are stored in-memory and will be lost on container restart — you'll need to log in again after a restart. This is by design and cannot be solved with a volume mount.
+Example docker-compose volumes:
+```yaml
+volumes:
+  - ./claude-config:/home/claude/.claude
+  - ./claude-config/.claude.json:/home/claude/.claude.json
+```
+
+**Note:** Auth proxy sessions (web terminal login) are stored in-memory and will be lost on container restart — you'll need to enter the web password again after a restart. This is separate from Claude Code authentication which persists via the mounted volumes.
 
 ## Container Details
 
