@@ -1,97 +1,90 @@
-FROM node:22-bookworm
+# Stage 1: Build ttyd
+FROM node:22-bookworm AS builder
 
-# Install system dependencies
 RUN apt-get update && apt-get install -y \
-    git \
-    curl \
-    wget \
-    vim \
-    build-essential \
-    cmake \
-    libjson-c-dev \
-    libwebsockets-dev \
-    supervisor \
-    ca-certificates \
-    gnupg \
-    sudo \
-    jq \
-    htop \
-    dnsutils \
-    iproute2 \
-    iputils-ping \
-    traceroute \
-    lsof \
-    openssh-client \
-    ncdu \
-    rsync \
-    python3 \
-    tmux \
+    build-essential cmake git libjson-c-dev libwebsockets-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install yq (YAML processor)
-RUN curl -fsSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_$(dpkg --print-architecture) -o /usr/local/bin/yq \
-    && chmod +x /usr/local/bin/yq
+RUN git clone --branch 1.7.7 --depth 1 https://github.com/tsl0922/ttyd.git /tmp/ttyd && \
+    cd /tmp/ttyd && mkdir build && cd build && \
+    cmake .. && make && make install
 
-# Install Docker CLI (for optional Docker socket access)
-RUN install -m 0755 -d /etc/apt/keyrings && \
+# Stage 2: Runtime
+FROM node:22-slim
+
+ARG S6_OVERLAY_VERSION=3.2.0.2
+
+# Install xz-utils first for s6-overlay extraction
+RUN apt-get update && apt-get install -y --no-install-recommends xz-utils && rm -rf /var/lib/apt/lists/*
+
+# Install s6-overlay
+ADD https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-noarch.tar.xz /tmp
+ADD https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-x86_64.tar.xz /tmp
+RUN tar -C / -Jxpf /tmp/s6-overlay-noarch.tar.xz && \
+    tar -C / -Jxpf /tmp/s6-overlay-x86_64.tar.xz && \
+    rm /tmp/s6-overlay-*.tar.xz
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libjson-c5 libwebsockets17 libwebsockets-evlib-uv libuv1 \
+    git curl vim ca-certificates sudo jq htop \
+    dnsutils iproute2 iputils-ping traceroute lsof \
+    openssh-client ncdu rsync python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install yq
+RUN curl -fsSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_$(dpkg --print-architecture) \
+    -o /usr/local/bin/yq && chmod +x /usr/local/bin/yq
+
+# Install Docker CLI
+RUN apt-get update && apt-get install -y --no-install-recommends gnupg && \
+    install -m 0755 -d /etc/apt/keyrings && \
     curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && \
     chmod a+r /etc/apt/keyrings/docker.gpg && \
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian bookworm stable" > /etc/apt/sources.list.d/docker.list && \
-    apt-get update && \
-    apt-get install -y docker-ce-cli docker-compose-plugin && \
-    rm -rf /var/lib/apt/lists/*
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian bookworm stable" \
+    > /etc/apt/sources.list.d/docker.list && \
+    apt-get update && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin && \
+    apt-get purge -y gnupg && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
-# Build ttyd from source for latest version
-RUN git clone --branch 1.7.7 --depth 1 https://github.com/tsl0922/ttyd.git /tmp/ttyd && \
-    cd /tmp/ttyd && \
-    mkdir build && cd build && \
-    cmake .. && \
-    make && \
-    make install && \
-    rm -rf /tmp/ttyd
+# Copy ttyd from builder
+COPY --from=builder /usr/local/bin/ttyd /usr/local/bin/ttyd
 
-# Create a non-root user for security
-# Add to docker group for optional Docker socket access
+# Create user
 RUN groupadd -g 999 docker || true && \
     useradd -m -s /bin/bash -G docker claude && \
     mkdir -p /home/claude/workspace && \
     chown -R claude:claude /home/claude && \
     echo "claude ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
-# Install Claude Code using native installer (as claude user)
+# Install Claude Code
 USER claude
 RUN curl -fsSL https://claude.ai/install.sh | bash
 USER root
 
-# Add Claude Code to PATH for all users
 ENV PATH="/home/claude/.local/bin:${PATH}"
 
-# Copy and setup auth proxy
+# Setup auth-proxy
 COPY auth-proxy /app/auth-proxy
 WORKDIR /app/auth-proxy
-RUN npm install
+RUN npm install --omit=dev && npm cache clean --force
 
-# Copy supervisor config
-COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+# Setup s6-overlay services
+COPY s6-overlay/s6-rc.d /etc/s6-overlay/s6-rc.d
 
-# Copy entrypoint
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
-# Set workspace as working directory
 WORKDIR /home/claude/workspace
 
-# Expose auth proxy port
 EXPOSE 8080
 
-# Environment variables
-ENV ANTHROPIC_API_KEY=""
-ENV AUTH_PASSWORD=""
-ENV PROXY_PORT=8080
-ENV TTYD_PORT=7681
-ENV TTYD_URL=http://localhost:7681
+ENV ANTHROPIC_API_KEY="" \
+    AUTH_PASSWORD="" \
+    PROXY_PORT=8080 \
+    TTYD_PORT=7681 \
+    TTYD_URL=http://localhost:7681 \
+    NODE_OPTIONS="--max-old-space-size=64" \
+    S6_KEEP_ENV=1 \
+    S6_BEHAVIOUR_IF_STAGE2_FAILS=2
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:${PROXY_PORT:-8080}/login || exit 1
 
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/init"]

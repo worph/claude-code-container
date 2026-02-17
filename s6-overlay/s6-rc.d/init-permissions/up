@@ -1,0 +1,1 @@
+/bin/sh -c "mkdir -p /home/claude/.claude && if [ $(stat -c%s /home/claude/.claude.json 2>/dev/null || echo 0) -lt 2 ] || ! jq -e 'keys' /home/claude/.claude.json >/dev/null 2>&1; then echo '{}' > /home/claude/.claude.json; fi && chown -R claude:claude /home/claude/.claude /home/claude/workspace /home/claude/.claude.json && echo 'Claude Code Terminal starting...'"

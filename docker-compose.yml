@@ -32,5 +32,10 @@ services:
 
     restart: unless-stopped
 
+    # Resource limits
+    mem_limit: 1g
+    mem_reservation: 256m
+    cpus: 2.0
+
 volumes:
   workspace:

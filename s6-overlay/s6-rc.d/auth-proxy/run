@@ -1,0 +1,3 @@
+#!/command/with-contenv sh
+cd /app/auth-proxy
+exec node server.js
