@@ -4,24 +4,17 @@ services:
       context: .
       dockerfile: Dockerfile
 
-    # --- NETWORK MODE ---
-    # Option 1: Bridge mode (default) - use ports mapping
+    # App runs behind a reverse proxy - no direct port exposure needed
+    # Uncomment ports below for local testing/development
     ports:
       - "8080:8080"
-      - "3000:3000"  # Direct wetty access for testing
-
-    # Option 2: Host mode - uncomment below and comment out 'ports' above
-    # network_mode: host
+      # - "3000:3000"  # Wetty (SSH-based terminal) - not used in main flow
+    # network_mode: host  # Uncomment for host networking if needed
 
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - AUTH_PASSWORD=${AUTH_PASSWORD}
-      - PROXY_PORT=8080
-      - TTYD_PORT=7681
-      - TTYD_URL=http://localhost:7681
-      - WETTY_PORT=3000
-      - WETTY_URL=http://localhost:3000
-      - CLAUDE_SESSION_TTL=1800  # 30 minutes
+      - CLAUDE_SESSION_TTL=1800  # Session timeout in seconds (30 minutes)
 
     volumes:
       - workspace:/home/claude/workspace

@@ -50,13 +50,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends gnupg && \
 # Copy ttyd from builder
 COPY --from=builder /usr/local/bin/ttyd /usr/local/bin/ttyd
 
-# Create user
+# Create user (password set at runtime by init-permissions)
 RUN groupadd -g 999 docker || true && \
     useradd -m -s /bin/bash -G docker claude && \
     mkdir -p /home/claude/workspace && \
     chown -R claude:claude /home/claude && \
-    echo "claude ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers && \
-    echo "claude:claude" | chpasswd
+    echo "claude ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 # Configure SSH for local connections only
 RUN sed -i 's/#PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config && \
@@ -104,7 +103,6 @@ ENV ANTHROPIC_API_KEY="" \
     PROXY_PORT=8080 \
     TTYD_PORT=7681 \
     WETTY_PORT=3000 \
-    WETTY_URL=http://localhost:3000 \
     CLAUDE_SESSION_TTL=1800 \
     NODE_OPTIONS="--max-old-space-size=64" \
     S6_KEEP_ENV=1 \

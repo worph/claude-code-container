@@ -1,7 +1,5 @@
 const http = require('http');
 const httpProxy = require('http-proxy');
-const fs = require('fs');
-const path = require('path');
 const crypto = require('crypto');
 
 const PORT = process.env.PROXY_PORT || 8080;

@@ -1,0 +1,82 @@
+#!/command/with-contenv sh
+# Session cleanup service - kills abduco sessions when no clients connected for > SESSION_TTL seconds
+# Works with both ttyd (websocket) and wetty (SSH) by checking actual connections
+
+STATE_FILE="/tmp/session-detached-since"
+CHECK_INTERVAL=15
+
+# Default to 30 minutes if not set
+SESSION_TTL="${CLAUDE_SESSION_TTL:-1800}"
+
+log() {
+    echo "[session-cleanup] $*"
+}
+
+# Check if any clients are connected to ttyd (websocket on port 7681)
+has_ttyd_clients() {
+    # Count ESTABLISHED connections to port 7681 (excluding LISTEN)
+    CONN_COUNT=$(ss -tn state established "( sport = :7681 )" 2>/dev/null | grep -c "ESTAB" || echo "0")
+    [ "$CONN_COUNT" -gt 0 ]
+}
+
+# Check if abduco session has attached clients (for wetty/SSH flow)
+has_abduco_clients() {
+    # Check if any session line starts with * (active)
+    su -s /bin/sh claude -c 'abduco -l 2>/dev/null | grep -q "^\*"'
+}
+
+# Check if any abduco session exists
+has_abduco_session() {
+    su -s /bin/sh claude -c 'abduco -l 2>/dev/null | grep -qE "^[* ].*[0-9]+\s+\S+$"'
+}
+
+while true; do
+    sleep "$CHECK_INTERVAL"
+
+    # Check if any session exists
+    if ! has_abduco_session; then
+        rm -f "$STATE_FILE"
+        continue
+    fi
+
+    # Check if any client is connected
+    # For ttyd: check websocket connections (abduco always shows "active" with ttyd)
+    # For wetty: ttyd check will be 0, so fall back to abduco check
+    if has_ttyd_clients; then
+        # Clients connected - reset timer
+        if [ -f "$STATE_FILE" ]; then
+            log "Client reconnected, resetting timer"
+            rm -f "$STATE_FILE"
+        fi
+    else
+        # No clients connected
+        NOW=$(date +%s)
+
+        if [ ! -f "$STATE_FILE" ]; then
+            # First time seeing no clients, record timestamp
+            echo "$NOW" > "$STATE_FILE"
+            log "No clients connected, starting TTL countdown (${SESSION_TTL}s)"
+        else
+            # Check how long since last client
+            DETACHED_SINCE=$(cat "$STATE_FILE" 2>/dev/null || echo "$NOW")
+            ELAPSED=$((NOW - DETACHED_SINCE))
+
+            if [ "$ELAPSED" -ge "$SESSION_TTL" ]; then
+                log "Session exceeded TTL (${ELAPSED}s >= ${SESSION_TTL}s), terminating"
+
+                # Kill abduco server process (owned by claude user)
+                su -s /bin/sh claude -c '
+                    for pid in $(pgrep -u "$(id -u)" -f "abduco" 2>/dev/null); do
+                        ppid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d " ")
+                        if [ "$ppid" = "1" ]; then
+                            kill -TERM "$pid" 2>/dev/null
+                            echo "[session-cleanup] Killed abduco server (PID $pid)"
+                        fi
+                    done
+                '
+
+                rm -f "$STATE_FILE"
+            fi
+        fi
+    fi
+done

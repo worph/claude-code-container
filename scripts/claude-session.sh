@@ -5,7 +5,6 @@
 SESSION_NAME="claude-session"
 SOCKET_DIR="$HOME/.abduco"
 SOCKET_PATH="$SOCKET_DIR/${SESSION_NAME}@$(hostname)"
-LOCK_FILE="/tmp/claude-session.lock"
 
 cd /home/claude/workspace
 
@@ -32,33 +31,49 @@ kill_all_clients() {
     done
 }
 
+# Function to trigger redraw with multiple attempts
+trigger_redraw() {
+    (
+        # Try multiple times with increasing delays: 0, 0.3, 1, 3 seconds
+        for delay in 0 0.3 1 3; do
+            sleep "$delay"
+
+            CLAUDE_PID=$(pgrep -u "$(id -u)" -x claude 2>/dev/null | head -1)
+            [ -z "$CLAUDE_PID" ] && continue
+
+            # Method 1: Send SIGWINCH directly to Claude (fast)
+            kill -WINCH "$CLAUDE_PID" 2>/dev/null
+
+            # Method 2: PTY size toggle (more reliable, use on later attempts)
+            if [ "$delay" = "1" ] || [ "$delay" = "3" ]; then
+                CLAUDE_TTY=$(ps -o tty= -p "$CLAUDE_PID" 2>/dev/null | tr -d ' ')
+                if [ -n "$CLAUDE_TTY" ] && [ "$CLAUDE_TTY" != "?" ]; then
+                    PTY_DEV="/dev/$CLAUDE_TTY"
+                    read -r ROWS COLS < <(stty -F "$PTY_DEV" size 2>/dev/null)
+                    if [ -n "$COLS" ] && [ -n "$ROWS" ]; then
+                        stty -F "$PTY_DEV" cols $((COLS - 1)) rows $((ROWS - 1)) 2>/dev/null
+                        sleep 0.05
+                        stty -F "$PTY_DEV" cols "$COLS" rows "$ROWS" 2>/dev/null
+                    fi
+                fi
+            fi
+        done
+    ) &
+}
+
 if [ -S "$SOCKET_PATH" ]; then
     # Session exists - kill existing clients first
     kill_all_clients
     sleep 0.2
 
-    # Force screen redraw by resizing the PTY after attach
-    # This triggers SIGWINCH with actual size change, forcing Claude to redraw
-    (
-        sleep 0.5
-        # Find Claude's PTY and toggle its size to force redraw
-        CLAUDE_TTY=$(ps -o tty= -p "$(pgrep -u "$(id -u)" -x claude 2>/dev/null | head -1)" 2>/dev/null | tr -d ' ')
-        if [ -n "$CLAUDE_TTY" ] && [ "$CLAUDE_TTY" != "?" ]; then
-            PTY_DEV="/dev/$CLAUDE_TTY"
-            # Get current size, shrink by 1, then restore
-            COLS=$(stty -F "$PTY_DEV" size 2>/dev/null | awk '{print $2}')
-            ROWS=$(stty -F "$PTY_DEV" size 2>/dev/null | awk '{print $1}')
-            if [ -n "$COLS" ] && [ -n "$ROWS" ]; then
-                stty -F "$PTY_DEV" cols $((COLS - 1)) rows $((ROWS - 1)) 2>/dev/null
-                sleep 0.1
-                stty -F "$PTY_DEV" cols "$COLS" rows "$ROWS" 2>/dev/null
-            fi
-        fi
-    ) &
+    # Trigger redraw attempts in background
+    trigger_redraw
 
     # Attach to existing session
     exec abduco -a "$SESSION_NAME"
 else
     # No session exists - create and attach
+    # Also trigger redraw for new sessions (Claude might need it after startup)
+    trigger_redraw
     exec abduco -A "$SESSION_NAME" claude
 fi

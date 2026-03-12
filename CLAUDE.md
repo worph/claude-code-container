@@ -44,6 +44,8 @@ docker compose exec claude-code bash
 
 ```
 Browser → :8080 Auth Proxy (Node.js) → :7681 ttyd → Claude Code CLI
+                                    or
+Browser → :3000 Wetty → :22 sshd → Claude Code CLI
 ```
 
 **Request Flow:**
@@ -52,9 +54,15 @@ Browser → :8080 Auth Proxy (Node.js) → :7681 ttyd → Claude Code CLI
 3. Authenticated requests proxy to ttyd on internal port 7681
 4. ttyd provides terminal running Claude Code as the `claude` user
 
+Alternative flow via Wetty (port 3000):
+1. Wetty authenticates via sshd on localhost
+2. sshd runs the claude-session.sh wrapper script
+3. Session persists via abduco for reconnection
+
 **Process Management:**
-- Supervisor runs both ttyd and auth-proxy with auto-restart
-- Configuration in `supervisord.conf`
+- s6-overlay manages all services with auto-restart
+- Service definitions in `s6-overlay/s6-rc.d/`
+- Services: auth-proxy, ttyd, sshd, wetty, session-cleanup
 
 ## Key Files
 
@@ -62,8 +70,8 @@ Browser → :8080 Auth Proxy (Node.js) → :7681 ttyd → Claude Code CLI
 |------|---------|
 | `auth-proxy/server.js` | HTTP proxy with login page, session management, WebSocket upgrade handling |
 | `Dockerfile` | Node 22 base, compiles ttyd from source, installs Claude Code globally |
-| `supervisord.conf` | Process supervision for ttyd and auth-proxy |
-| `entrypoint.sh` | Container startup, validates environment variables |
+| `s6-overlay/s6-rc.d/` | s6-overlay service definitions (auth-proxy, ttyd, sshd, wetty, session-cleanup) |
+| `scripts/claude-session.sh` | Session wrapper using abduco for persistence |
 
 ## Authentication Details
 
@@ -78,6 +86,7 @@ Browser → :8080 Auth Proxy (Node.js) → :7681 ttyd → Claude Code CLI
 |----------|----------|-------------|
 | `ANTHROPIC_API_KEY` | No | Claude API key. Leave empty to use subscription auth (OAuth) |
 | `AUTH_PASSWORD` | Yes | Login password for web terminal |
+| `CLAUDE_SESSION_TTL` | No | Seconds before disconnected sessions are cleaned up (default: 1800) |
 | `PROXY_PORT` | No | Auth proxy port (default: 8080) |
 | `TTYD_PORT` | No | Internal ttyd port (default: 7681) |
 
