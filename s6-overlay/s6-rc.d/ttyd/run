@@ -1,5 +1,5 @@
 #!/command/with-contenv sh
-exec ttyd -W -s 15 -p "${TTYD_PORT:-7681}" \
+exec ttyd -W -p "${TTYD_PORT:-7681}" \
     -t fontSize=14 \
     -t "theme={'background':'#1e1e1e','foreground':'#d4d4d4'}" \
-    su - claude -c "cd /home/claude/workspace && claude"
+    su - claude -c "/home/claude/scripts/claude-session.sh"

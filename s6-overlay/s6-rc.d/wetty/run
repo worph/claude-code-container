@@ -1,0 +1,10 @@
+#!/command/with-contenv sh
+# Wait for sshd to be ready
+sleep 2
+exec wetty --host 0.0.0.0 --port "${WETTY_PORT:-3000}" \
+    --ssh-host 127.0.0.1 \
+    --ssh-port 22 \
+    --ssh-user claude \
+    --ssh-auth publickey,password \
+    --command "/home/claude/scripts/claude-session.sh" \
+    --base /

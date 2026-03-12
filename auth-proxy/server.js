@@ -5,7 +5,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = process.env.PROXY_PORT || 8080;
-const TTYD_URL = process.env.TTYD_URL || 'http://localhost:7681';
+const BACKEND_URL = process.env.TTYD_URL || 'http://localhost:7681';
 const AUTH_PASSWORD = process.env.AUTH_PASSWORD || '';
 
 // Simple session store (in-memory)
@@ -78,7 +78,7 @@ function clearLoginAttempts(ip) {
 
 // Create proxy
 const proxy = httpProxy.createProxyServer({
-    target: TTYD_URL,
+    target: BACKEND_URL,
     ws: true
 });
 
@@ -86,7 +86,7 @@ proxy.on('error', (err, req, res) => {
     console.error('Proxy error:', err);
     if (res.writeHead) {
         res.writeHead(502, { 'Content-Type': 'text/plain' });
-        res.end('Bad Gateway - ttyd not available');
+        res.end('Bad Gateway - terminal backend not available');
     }
 });
 
@@ -345,6 +345,6 @@ server.on('upgrade', (req, socket, head) => {
 
 server.listen(PORT, () => {
     console.log(`Auth proxy listening on port ${PORT}`);
-    console.log(`Proxying to ttyd at ${TTYD_URL}`);
+    console.log(`Proxying to backend at ${BACKEND_URL}`);
     console.log(`Authentication: ${AUTH_PASSWORD ? 'enabled' : 'disabled'}`);
 });

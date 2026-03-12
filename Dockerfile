@@ -29,8 +29,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libjson-c5 libwebsockets17 libwebsockets-evlib-uv libuv1 \
     git curl vim ca-certificates sudo jq htop \
     dnsutils iproute2 iputils-ping traceroute lsof \
-    openssh-client ncdu rsync python3 \
-    && rm -rf /var/lib/apt/lists/*
+    openssh-client openssh-server ncdu rsync python3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /run/sshd
 
 # Install yq
 RUN curl -fsSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_$(dpkg --print-architecture) \
@@ -54,7 +55,26 @@ RUN groupadd -g 999 docker || true && \
     useradd -m -s /bin/bash -G docker claude && \
     mkdir -p /home/claude/workspace && \
     chown -R claude:claude /home/claude && \
-    echo "claude ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+    echo "claude ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers && \
+    echo "claude:claude" | chpasswd
+
+# Configure SSH for local connections only
+RUN sed -i 's/#PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config && \
+    sed -i 's/#PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config && \
+    echo "ListenAddress 127.0.0.1" >> /etc/ssh/sshd_config
+
+# Install wetty (needs build tools for node-pty) and compile abduco for session persistence
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential python3 procps \
+    && npm install -g wetty \
+    && npm cache clean --force \
+    && git clone --depth 1 https://github.com/martanne/abduco.git /tmp/abduco \
+    && cd /tmp/abduco \
+    && ./configure && make && make install \
+    && rm -rf /tmp/abduco \
+    && apt-get purge -y build-essential \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install Claude Code
 USER claude
@@ -71,6 +91,10 @@ RUN npm install --omit=dev && npm cache clean --force
 # Setup s6-overlay services
 COPY s6-overlay/s6-rc.d /etc/s6-overlay/s6-rc.d
 
+# Setup session wrapper scripts
+COPY scripts /home/claude/scripts
+RUN chmod +x /home/claude/scripts/*.sh && chown -R claude:claude /home/claude/scripts
+
 WORKDIR /home/claude/workspace
 
 EXPOSE 8080
@@ -79,7 +103,9 @@ ENV ANTHROPIC_API_KEY="" \
     AUTH_PASSWORD="" \
     PROXY_PORT=8080 \
     TTYD_PORT=7681 \
-    TTYD_URL=http://localhost:7681 \
+    WETTY_PORT=3000 \
+    WETTY_URL=http://localhost:3000 \
+    CLAUDE_SESSION_TTL=1800 \
     NODE_OPTIONS="--max-old-space-size=64" \
     S6_KEEP_ENV=1 \
     S6_BEHAVIOUR_IF_STAGE2_FAILS=2
