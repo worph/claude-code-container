@@ -1,38 +1,43 @@
+# Dev stack — start with: docker compose up -d --build
+# Container name: claude-code-app-dev (separate from production claude-code)
+
 services:
-  claude-code:
+  claude-code-app-dev:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: claude-code-app-dev
 
-    # App runs behind a reverse proxy - no direct port exposure needed
-    # Uncomment ports below for local testing/development
     ports:
-      - "8080:8080"
-      # - "3000:3000"  # Wetty (SSH-based terminal) - not used in main flow
-    # network_mode: host  # Uncomment for host networking if needed
+      - "8081:8080"
 
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - AUTH_PASSWORD=${AUTH_PASSWORD}
-      - CLAUDE_SESSION_TTL=1800  # Session timeout in seconds (30 minutes)
+      - CLAUDE_SESSION_TTL=1800
 
     volumes:
-      - workspace:/home/claude/workspace
-      # Claude config directory (credentials, settings, history)
+      - workspace-dev:/home/claude/workspace
       - ./claude-config:/home/claude/.claude
-      # Claude session state file (required for auth persistence)
       - ./claude-config/.claude.json:/home/claude/.claude.json
-
-      # --- DOCKER ACCESS ---
-      # WARNING: This gives the container full control over Docker on the host
+      # Bind-mount source for live editing
+      - ./auth-proxy:/home/claude/auth-proxy
+      - ./mcp-server:/home/claude/mcp-server
+      - ./scripts:/home/claude/scripts
+      # Docker socket
       - /var/run/docker.sock:/var/run/docker.sock
 
     restart: unless-stopped
-
-    # Resource limits
     mem_limit: 1g
     mem_reservation: 256m
     cpus: 2.0
 
+    networks:
+      - mcp-network
+
 volumes:
-  workspace:
+  workspace-dev:
+
+networks:
+  mcp-network:
+    external: true

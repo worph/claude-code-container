@@ -10,36 +10,40 @@ Claude Code Container is a Docker-based application that provides a web-accessib
 - **MCP Server**: Model Context Protocol server for programmatic access (mcp-server/server.js)
 - **Claude Code**: Anthropic's CLI tool
 
-## Commands
+## WARNING: Container Naming — READ THIS FIRST
 
-### Build and Run
+> **NEVER touch, stop, restart, or remove the `claude-code` container.** That is the **production container** — it is the container you (Claude Code) are currently running inside. Restarting or removing it will kill your own process and the user's session.
+>
+> Always use `docker-compose.dev.yml` which creates a container named **`claude-code-app-dev`**.
 
-```bash
-# Copy and configure environment
-cp .env.example .env
-# Edit .env with ANTHROPIC_API_KEY and AUTH_PASSWORD
+## Dev Stack
 
-# Build and run with Docker Compose
-docker compose up -d
-
-# Or build manually
-docker build -t claude-code-container .
-```
-
-Access at http://localhost:8080 after starting.
-
-### Development
+Use `docker-compose.dev.yml` for all development and testing. It creates a container named `claude-code-app-dev` on port 8081.
 
 ```bash
-# Rebuild after Dockerfile changes
+cd /d/workspace/sandbox/claude-code-container
+
+# Start
 docker compose up -d --build
 
-# View logs
+# Logs
 docker compose logs -f
 
-# Shell into running container
-docker compose exec claude-code bash
+# Shell
+docker exec -it claude-code-app-dev bash
+
+# Restart
+docker compose restart
+
+# Stop
+docker compose down
 ```
+
+- **Container name:** `claude-code-app-dev`
+- **Port:** `8081` (host) → `8080` (container)
+- **Docker network:** `mcp-network` (shared with telegram-mcp)
+- **MCP endpoint from other containers:** `http://claude-code-app-dev:8080/mcp`
+- **Bind-mounts:** `auth-proxy/`, `mcp-server/`, `scripts/` for live editing
 
 ## Architecture
 
@@ -92,80 +96,74 @@ External (:8080)
 **Process Management:**
 - s6-overlay manages all services with auto-restart
 - Service definitions in `s6-overlay/s6-rc.d/`
-- Services: auth-proxy, ttyd, mcp-server, sshd, wetty, session-cleanup
+- Startup order: `init-permissions` → `sshd` → `ttyd`, `auth-proxy`, `mcp-server`, `wetty`, `session-cleanup`
+- Services run as `claude` user except sshd (root)
+
+## Debugging
+
+```bash
+# View all service logs
+docker compose logs -f
+
+# View specific service logs inside container
+docker compose exec claude-code s6-rc -a list   # List services
+docker compose exec claude-code cat /run/service/auth-proxy/supervise/status
+
+# Check MCP server directly (from inside container)
+docker compose exec claude-code curl -s http://localhost:9090/mcp/status
+
+# Check WebSocket connections
+docker compose exec claude-code curl -s http://localhost:8080/internal/ws-status
+
+# Restart a specific service
+docker compose exec claude-code s6-svc -r /run/service/mcp-server
+```
 
 ## MCP Server
 
-The MCP (Model Context Protocol) server allows external Claude instances to interact with this container programmatically.
+The MCP (Model Context Protocol) server allows external Claude instances to interact with this container programmatically. Auth: `Authorization: Bearer <AUTH_PASSWORD>`
 
-### Authentication
+### Tools
 
-All `/mcp/*` requests require Bearer token authentication:
-```
-Authorization: Bearer <AUTH_PASSWORD>
-```
+| Tool | Description |
+|------|-------------|
+| `query_claude` | Send prompt to Claude Code. Params: `prompt` (required), `continueSession` (default: true), `workdir` (default: `/home/claude/workspace/mcp`), `timeout` (default: 120s), `chatId` (Telegram chat ID for permission prompts), `permissionCallbackUrl` (REST endpoint for permission prompts) |
+| `check_status` | Returns `{available, browserConnected, queryInProgress}` |
 
-### Available Tools
+### Interactive Permission Prompts
 
-#### `query_claude`
-Send a prompt to Claude Code and get a response.
+When `query_claude` is called with a `chatId` parameter, Claude will request user permission via Telegram inline keyboard buttons before executing potentially dangerous operations (bash commands, file writes, etc.).
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `prompt` | string | Yes | - | The message to send |
-| `continueSession` | boolean | No | `true` | Continue previous conversation (`-c` flag) |
-| `workdir` | string | No | `/home/claude/workspace/mcp` | Working directory (determines history) |
-| `timeout` | number | No | `120` | Timeout in seconds |
+**Requirements:**
+- Provide `chatId` and `permissionCallbackUrl` in the query_claude call
+- The callback URL must point to a REST endpoint that accepts permission requests (e.g., `http://telegram-mcp:8080/api/permission`)
 
-#### `check_status`
-Check if Claude Code is available for queries.
+**Flow:**
+1. External service calls `query_claude` with `chatId` and `permissionCallbackUrl`
+2. When Claude needs permission, `permission-mcp.js` sends a `POST` to the callback URL
+3. User sees inline keyboard with Allow/Deny/Always Allow buttons
+4. User's decision is returned as plain JSON `{queryId, decision, timedOut}`
+5. Claude continues or aborts based on decision
 
-Returns:
-```json
-{
-  "available": true,
-  "browserConnected": false,
-  "queryInProgress": false
-}
-```
+### Quick Test
 
-### Example Usage
-
-**Initialize connection:**
 ```bash
+# Test MCP is responding
 curl -X POST http://localhost:8080/mcp \
   -H "Authorization: Bearer $AUTH_PASSWORD" \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize"}'
-```
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 
-**List available tools:**
-```bash
+# Send a query
 curl -X POST http://localhost:8080/mcp \
   -H "Authorization: Bearer $AUTH_PASSWORD" \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"query_claude","arguments":{"prompt":"ls","timeout":30}}}'
 ```
 
-**Send a query:**
-```bash
-curl -X POST http://localhost:8080/mcp \
-  -H "Authorization: Bearer $AUTH_PASSWORD" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc":"2.0",
-    "id":3,
-    "method":"tools/call",
-    "params":{
-      "name":"query_claude",
-      "arguments":{"prompt":"Hello, what can you do?","timeout":30}
-    }
-  }'
-```
+### Using as MCP Server from Claude Code
 
-### Claude Code MCP Client Configuration
-
-To use this container as an MCP server from another Claude Code instance, add to `~/.claude.json`:
+Add to `~/.claude.json` to use `mcp-client.js` as a stdio-to-HTTP bridge:
 
 ```json
 {
@@ -183,53 +181,30 @@ To use this container as an MCP server from another Claude Code instance, add to
 }
 ```
 
-## Session & History Management
+## Session & History
 
-Claude Code maintains **per-directory conversation history** in `~/.claude/projects/`.
+Claude Code stores per-directory history in `~/.claude/projects/`. The directory path is mangled (slashes → dashes):
+- Web UI: `-home-claude-workspace/` (from `/home/claude/workspace`)
+- MCP: `-home-claude-workspace-mcp/` (from `/home/claude/workspace/mcp`)
 
-```
-~/.claude/projects/
-├── -home-claude-workspace/           ← Web UI conversations
-│   └── <conversation-id>.jsonl
-└── -home-claude-workspace-mcp/       ← MCP conversations (isolated)
-    └── <conversation-id>.jsonl
-```
-
-**Key behaviors:**
-- The `-c` flag continues the most recent conversation in a directory
-- Web UI uses `/home/claude/workspace` → separate history from MCP
-- MCP defaults to `/home/claude/workspace/mcp` → isolated history
-- Use `workdir` parameter in MCP to target specific project folders
-
-**To share history between MCP and Web UI:**
-```json
-{
-  "prompt": "What did we discuss?",
-  "workdir": "/home/claude/workspace"
-}
-```
+Use MCP's `workdir` parameter to share history with web UI: `"workdir": "/home/claude/workspace"`
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `auth-proxy/server.js` | HTTP proxy with login page, session management, WebSocket handling, MCP routing |
-| `mcp-server/server.js` | MCP JSON-RPC server, spawns claude processes, handles timeouts |
-| `mcp-client.js` | Stdio-to-HTTP bridge for using container as MCP server from Claude Code |
-| `Dockerfile` | Node 22 base, compiles ttyd, installs Claude Code and MCP server |
-| `s6-overlay/s6-rc.d/` | s6-overlay service definitions |
-| `scripts/claude-session.sh` | Session wrapper using abduco for persistence |
+| `auth-proxy/server.js` | HTTP proxy: login/session (cookie), MCP routing (Bearer), WebSocket proxy to ttyd |
+| `mcp-server/server.js` | JSON-RPC 2.0 server, spawns `claude -p -c` processes, tracks query state |
+| `mcp-server/permission-mcp.js` | Stdio MCP server for permission prompts, forwards to telegram-mcp |
+| `mcp-client.js` | Stdio-to-HTTP bridge for Claude Code MCP client integration |
+| `scripts/claude-session.sh` | abduco wrapper: kills existing clients, triggers SIGWINCH for redraw |
+| `s6-overlay/s6-rc.d/` | Service definitions (oneshot: init-permissions; longrun: others) |
 
-## Authentication Details
+## Authentication
 
-**Web UI (Cookie-based):**
-- Sessions stored in-memory with 24-hour expiration
-- Session cookies: HttpOnly, SameSite=Strict
-- Login page HTML embedded in `auth-proxy/server.js`
-
-**MCP (Bearer token):**
-- Uses `AUTH_PASSWORD` as Bearer token
-- Header: `Authorization: Bearer <AUTH_PASSWORD>`
+- **Web UI**: In-memory sessions (24h TTL), cookie `session=<id>; HttpOnly; SameSite=Strict`
+- **MCP**: `Authorization: Bearer <AUTH_PASSWORD>` header
+- **Both use the same `AUTH_PASSWORD`** environment variable
 
 ## Environment Variables
 
@@ -245,33 +220,21 @@ Claude Code maintains **per-directory conversation history** in `~/.claude/proje
 
 ## Data Persistence
 
-Claude Code stores configuration in **two locations** that must both be persisted:
-
-| Volume Mount | Purpose |
-|---|---|
-| `/home/claude/workspace` | Working directory for projects, files, and MCP workspace |
-| `/home/claude/.claude` | Credentials, settings, history, and project metadata |
-| `/home/claude/.claude.json` | Session state file with account info |
-
-**Important:** Both `.claude/` directory AND `.claude.json` file must be mounted for authentication to persist across container restarts.
-
-Example docker-compose volumes:
+**Required volumes for auth persistence:**
 ```yaml
 volumes:
-  - ./workspace:/home/claude/workspace
-  - ./claude-config:/home/claude/.claude
-  - ./claude-config/.claude.json:/home/claude/.claude.json
+  - ./workspace:/home/claude/workspace          # Project files
+  - ./claude-config:/home/claude/.claude        # Settings, history, credentials
+  - ./claude-config/.claude.json:/home/claude/.claude.json  # Session state
 ```
 
-**Note:** Auth proxy sessions (web login) are in-memory and lost on restart. Claude Code auth persists via mounted volumes.
+Both `.claude/` and `.claude.json` must be mounted. Web login sessions are in-memory only (lost on restart).
 
 ## Container Details
 
-- Non-root user: `claude` (UID 999)
-- Working directory: `/home/claude/workspace`
-- MCP workspace: `/home/claude/workspace/mcp`
-- Docker CLI installed for optional socket access
-- ttyd theme: dark background (#1e1e1e), font size 14px
+- User: `claude` (UID 999), member of `docker` group
+- Workdir: `/home/claude/workspace`, MCP: `/home/claude/workspace/mcp`
+- Memory: limited to 1GB, Node heap limited to 64MB (`NODE_OPTIONS="--max-old-space-size=64"`)
 
 ## Error Codes (MCP)
 

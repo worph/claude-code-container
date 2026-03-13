@@ -48,6 +48,46 @@ docker compose up -d
 
 Access at: `http://localhost:8080`
 
+> **Note:** The default `docker-compose.yml` creates a container named `claude-code-app-dev` to avoid conflicts with a production `claude-code` container.
+
+## Development
+
+```bash
+# Start the dev stack (container: claude-code-app-dev, port: 8081)
+docker compose up -d --build
+
+# View logs
+docker compose logs -f
+
+# Shell into dev container
+docker exec -it claude-code-app-dev bash
+
+# Restart after code changes (auth-proxy/, mcp-server/, scripts/ are bind-mounted)
+docker compose restart
+
+# Tear down
+docker compose down
+```
+
+**Important:** Never stop or remove a container named `claude-code` — that is the production instance. `docker compose` only manages `claude-code-app-dev`.
+
+### Networking with telegram-mcp
+
+Both containers join `mcp-network`. From telegram-mcp, reach the dev container at:
+- **Hostname:** `claude-code-app-dev`
+- **MCP endpoint:** `http://claude-code-app-dev:8080/mcp`
+
+Update telegram-mcp's `config.json` target URL accordingly:
+```json
+{
+  "target": {
+    "transport": "http",
+    "url": "http://claude-code-app-dev:8080/mcp",
+    "authToken": "<AUTH_PASSWORD from .env>"
+  }
+}
+```
+
 ## Architecture
 
 ```

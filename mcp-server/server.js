@@ -10,6 +10,9 @@ const DEFAULT_MCP_WORKDIR = '/home/claude/workspace/mcp';
 // Track if a query is currently in progress
 let queryInProgress = false;
 
+// Track active queries with their metadata (for permission routing)
+const activeQueries = new Map(); // queryId -> { chatId, ... }
+
 // JSON-RPC error codes
 const JSONRPC_ERRORS = {
     PARSE_ERROR: -32700,
@@ -46,6 +49,14 @@ const TOOLS = [
                 timeout: {
                     type: 'number',
                     description: 'Timeout in seconds for the query (default: 120)'
+                },
+                chatId: {
+                    type: 'string',
+                    description: 'Telegram chat ID for permission prompts. When provided, Claude will request permission via Telegram before executing tools.'
+                },
+                permissionCallbackUrl: {
+                    type: 'string',
+                    description: 'URL of the permission REST endpoint (e.g., http://telegram-mcp:8080/api/permission). Required for permission prompts.'
                 }
             },
             required: ['prompt']
@@ -211,6 +222,11 @@ async function handleQueryClaude(id, args, res, req) {
     // Working directory (default to MCP-specific workspace)
     const workdir = args.workdir || DEFAULT_MCP_WORKDIR;
 
+    // Permission prompts configuration
+    const chatId = args.chatId;
+    const permissionCallbackUrl = args.permissionCallbackUrl;
+    const enablePermissionPrompts = !!chatId && !!permissionCallbackUrl;
+
     // Ensure workdir exists
     if (!fs.existsSync(workdir)) {
         try {
@@ -226,19 +242,54 @@ async function handleQueryClaude(id, args, res, req) {
     if (args.continueSession !== false) {
         cmdArgs.push('-c');
     }
+
+    // Add permission prompt tool if enabled
+    let mcpConfigPath = null;
+    if (enablePermissionPrompts) {
+        // Create a temporary MCP config for the permission server
+        const mcpConfig = {
+            mcpServers: {
+                'permission': {
+                    command: 'node',
+                    args: ['/app/mcp-server/permission-mcp.js'],
+                    env: {
+                        PERMISSION_CHAT_ID: chatId,
+                        PERMISSION_CALLBACK_URL: permissionCallbackUrl,
+                        PERMISSION_TIMEOUT: String(timeoutSec)
+                    }
+                }
+            }
+        };
+
+        // Write temp config file
+        mcpConfigPath = `/tmp/mcp-config-${id}.json`;
+        try {
+            fs.writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig));
+            cmdArgs.push('--mcp-config', mcpConfigPath);
+            cmdArgs.push('--permission-prompt-tool', 'mcp__permission__permission_prompt');
+            console.log(`[MCP] Permission prompts enabled for chat ${chatId}`);
+        } catch (err) {
+            console.error(`[MCP] Failed to create MCP config: ${err.message}`);
+            // Continue without permission prompts
+        }
+    }
+
     cmdArgs.push(prompt);
 
-    console.log(`[MCP] Starting query (timeout: ${timeoutSec}s, workdir: ${workdir}): claude ${cmdArgs.slice(0, -1).join(' ')} '${prompt.substring(0, 50)}'...`);
+    console.log(`[MCP] Starting query (timeout: ${timeoutSec}s, workdir: ${workdir}, permissions: ${enablePermissionPrompts}): claude ${cmdArgs.slice(0, -1).join(' ')} '${prompt.substring(0, 50)}'...`);
+
+    // Build environment
+    const env = {
+        ...process.env,
+        HOME: '/home/claude',
+        USER: 'claude',
+        PATH: '/home/claude/.local/bin:' + (process.env.PATH || '')
+    };
 
     // Spawn claude directly (MCP server runs as claude user)
     const claude = spawn('claude', cmdArgs, {
         cwd: workdir,
-        env: {
-            ...process.env,
-            HOME: '/home/claude',
-            USER: 'claude',
-            PATH: '/home/claude/.local/bin:' + (process.env.PATH || '')
-        },
+        env,
         stdio: ['pipe', 'pipe', 'pipe']
     });
 
@@ -276,6 +327,15 @@ async function handleQueryClaude(id, args, res, req) {
         clearTimeout(timeoutId);
         queryInProgress = false;
         console.log(`[MCP] Query completed with exit code: ${code}${timedOut ? ' (timed out)' : ''}`);
+
+        // Clean up temp MCP config
+        if (mcpConfigPath && fs.existsSync(mcpConfigPath)) {
+            try {
+                fs.unlinkSync(mcpConfigPath);
+            } catch (err) {
+                console.error(`[MCP] Failed to clean up config: ${err.message}`);
+            }
+        }
 
         if (timedOut) {
             res.writeHead(408, { 'Content-Type': 'application/json' });
