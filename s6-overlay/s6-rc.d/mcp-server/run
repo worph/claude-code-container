@@ -1,0 +1,11 @@
+#!/command/with-contenv sh
+
+# Check if MCP is enabled
+if [ "$MCP_ENABLED" != "true" ] && [ "$MCP_ENABLED" != "1" ]; then
+    echo "[MCP] MCP server is disabled (MCP_ENABLED=${MCP_ENABLED:-unset})"
+    # Sleep forever to keep the service "running" but inactive
+    exec sleep infinity
+fi
+
+cd /app/mcp-server
+exec s6-setuidgid claude node server.js

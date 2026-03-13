@@ -53,7 +53,7 @@ COPY --from=builder /usr/local/bin/ttyd /usr/local/bin/ttyd
 # Create user (password set at runtime by init-permissions)
 RUN groupadd -g 999 docker || true && \
     useradd -m -s /bin/bash -G docker claude && \
-    mkdir -p /home/claude/workspace && \
+    mkdir -p /home/claude/workspace/mcp && \
     chown -R claude:claude /home/claude && \
     echo "claude ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
@@ -87,6 +87,11 @@ COPY auth-proxy /app/auth-proxy
 WORKDIR /app/auth-proxy
 RUN npm install --omit=dev && npm cache clean --force
 
+# Setup MCP server
+COPY mcp-server /app/mcp-server
+WORKDIR /app/mcp-server
+RUN npm install --omit=dev && npm cache clean --force
+
 # Setup s6-overlay services
 COPY s6-overlay/s6-rc.d /etc/s6-overlay/s6-rc.d
 
@@ -103,6 +108,8 @@ ENV ANTHROPIC_API_KEY="" \
     PROXY_PORT=8080 \
     TTYD_PORT=7681 \
     WETTY_PORT=3000 \
+    MCP_PORT=9090 \
+    MCP_ENABLED=true \
     CLAUDE_SESSION_TTL=1800 \
     NODE_OPTIONS="--max-old-space-size=64" \
     S6_KEEP_ENV=1 \

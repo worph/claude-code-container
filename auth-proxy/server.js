@@ -4,7 +4,12 @@ const crypto = require('crypto');
 
 const PORT = process.env.PROXY_PORT || 8080;
 const BACKEND_URL = process.env.TTYD_URL || 'http://localhost:7681';
+const MCP_URL = process.env.MCP_URL || 'http://localhost:9090';
 const AUTH_PASSWORD = process.env.AUTH_PASSWORD || '';
+const MCP_ENABLED = process.env.MCP_ENABLED === 'true' || process.env.MCP_ENABLED === '1';
+
+// Track active WebSocket connections for busy detection
+let activeWebSocketCount = 0;
 
 // Simple session store (in-memory)
 const sessions = new Map();
@@ -74,10 +79,15 @@ function clearLoginAttempts(ip) {
     loginAttempts.delete(ip);
 }
 
-// Create proxy
+// Create proxy for ttyd
 const proxy = httpProxy.createProxyServer({
     target: BACKEND_URL,
     ws: true
+});
+
+// Create proxy for MCP server
+const mcpProxy = httpProxy.createProxyServer({
+    target: MCP_URL
 });
 
 proxy.on('error', (err, req, res) => {
@@ -85,6 +95,14 @@ proxy.on('error', (err, req, res) => {
     if (res.writeHead) {
         res.writeHead(502, { 'Content-Type': 'text/plain' });
         res.end('Bad Gateway - terminal backend not available');
+    }
+});
+
+mcpProxy.on('error', (err, req, res) => {
+    console.error('MCP Proxy error:', err);
+    if (res.writeHead) {
+        res.writeHead(502, { 'Content-Type': 'text/plain' });
+        res.end('Bad Gateway - MCP server not available');
     }
 });
 
@@ -321,6 +339,42 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    // Internal WebSocket status endpoint (localhost only)
+    if (url.pathname === '/internal/ws-status') {
+        const clientIp = req.socket.remoteAddress;
+        // Only allow from localhost
+        if (clientIp === '127.0.0.1' || clientIp === '::1' || clientIp === '::ffff:127.0.0.1') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ connected: activeWebSocketCount > 0, count: activeWebSocketCount }));
+        } else {
+            res.writeHead(403, { 'Content-Type': 'text/plain' });
+            res.end('Forbidden');
+        }
+        return;
+    }
+
+    // Handle MCP routes with Bearer token auth
+    if (url.pathname.startsWith('/mcp')) {
+        // Check if MCP is enabled
+        if (!MCP_ENABLED) {
+            res.writeHead(503, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'MCP server is disabled' }));
+            return;
+        }
+
+        // Validate Bearer token
+        const authHeader = req.headers['authorization'];
+        if (AUTH_PASSWORD && (!authHeader || !authHeader.startsWith('Bearer ') || authHeader.substring(7) !== AUTH_PASSWORD)) {
+            res.writeHead(401, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Unauthorized' }));
+            return;
+        }
+
+        // Proxy to MCP server
+        mcpProxy.web(req, res);
+        return;
+    }
+
     // Check authentication for all other routes
     if (!isAuthenticated(req)) {
         res.writeHead(302, { 'Location': '/login' });
@@ -338,6 +392,21 @@ server.on('upgrade', (req, socket, head) => {
         socket.destroy();
         return;
     }
+
+    // Track WebSocket connection
+    activeWebSocketCount++;
+    console.log(`WebSocket connected. Active connections: ${activeWebSocketCount}`);
+
+    socket.on('close', () => {
+        activeWebSocketCount = Math.max(0, activeWebSocketCount - 1);
+        console.log(`WebSocket disconnected. Active connections: ${activeWebSocketCount}`);
+    });
+
+    socket.on('error', () => {
+        activeWebSocketCount = Math.max(0, activeWebSocketCount - 1);
+        console.log(`WebSocket error. Active connections: ${activeWebSocketCount}`);
+    });
+
     proxy.ws(req, socket, head);
 });
 
@@ -345,4 +414,5 @@ server.listen(PORT, () => {
     console.log(`Auth proxy listening on port ${PORT}`);
     console.log(`Proxying to backend at ${BACKEND_URL}`);
     console.log(`Authentication: ${AUTH_PASSWORD ? 'enabled' : 'disabled'}`);
+    console.log(`MCP server: ${MCP_ENABLED ? 'enabled' : 'disabled'}`);
 });
