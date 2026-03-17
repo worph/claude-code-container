@@ -44,7 +44,7 @@ const TOOLS = [
                 },
                 workdir: {
                     type: 'string',
-                    description: 'Working directory for the query, determines which project history to use (default: /home/claude/mcp-workspace)'
+                    description: 'Working directory for the query, determines which project history to use (default: /home/claude/workspace/mcp)'
                 },
                 timeout: {
                     type: 'number',

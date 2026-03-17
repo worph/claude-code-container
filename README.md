@@ -53,7 +53,7 @@ Access at: `http://localhost:8080`
 ## Development
 
 ```bash
-# Start the dev stack (container: claude-code-app-dev, port: 8081)
+# Start the dev stack (container: claude-code-app-dev, port: 8080)
 docker compose up -d --build
 
 # View logs
@@ -208,6 +208,7 @@ To share history, specify `workdir` in your query:
 | `MCP_ENABLED` | Enable/disable MCP server | `true` |
 | `PROXY_PORT` | External auth proxy port | `8080` |
 | `TTYD_PORT` | Internal ttyd port | `7681` |
+| `WETTY_PORT` | Internal wetty port | `3000` |
 | `MCP_PORT` | Internal MCP server port | `9090` |
 | `CLAUDE_SESSION_TTL` | Session cleanup timeout (seconds) | `1800` |
 
@@ -285,12 +286,14 @@ services:
 ├── auth-proxy/
 │   └── server.js           # Auth proxy with MCP routing
 ├── mcp-server/
-│   └── server.js           # MCP JSON-RPC server
+│   ├── server.js           # MCP JSON-RPC server
+│   └── permission-mcp.js   # Stdio MCP server for permission prompts
 ├── mcp-client.js           # Stdio-to-HTTP bridge for MCP
 ├── scripts/
 │   └── claude-session.sh   # Session wrapper with abduco
 ├── s6-overlay/
 │   └── s6-rc.d/            # Service definitions
+├── testplan.md             # Manual test plan
 └── CLAUDE.md               # Detailed documentation
 ```
 

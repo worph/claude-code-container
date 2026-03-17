@@ -7,9 +7,10 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: claude-code-app-dev
+    hostname: claude
 
     ports:
-      - "8081:8080"
+      - "8080:8080"
 
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}

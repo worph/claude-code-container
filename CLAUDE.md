@@ -14,14 +14,14 @@ Claude Code Container is a Docker-based application that provides a web-accessib
 
 > **NEVER touch, stop, restart, or remove the `claude-code` container.** That is the **production container** — it is the container you (Claude Code) are currently running inside. Restarting or removing it will kill your own process and the user's session.
 >
-> Always use `docker-compose.dev.yml` which creates a container named **`claude-code-app-dev`**.
+> Always use `docker-compose.yml` which creates a container named **`claude-code-app-dev`**.
 
 ## Dev Stack
 
-Use `docker-compose.dev.yml` for all development and testing. It creates a container named `claude-code-app-dev` on port 8081.
+Use `docker-compose.yml` for development and testing. It creates a container named `claude-code-app-dev`.
 
 ```bash
-cd /d/workspace/sandbox/claude-code-container
+cd /c/workspace/Sandbox/claude-code-container
 
 # Start
 docker compose up -d --build
@@ -40,10 +40,10 @@ docker compose down
 ```
 
 - **Container name:** `claude-code-app-dev`
-- **Port:** `8081` (host) → `8080` (container)
+- **Port:** `8080` (host) → `8080` (container)
 - **Docker network:** `mcp-network` (shared with telegram-mcp)
 - **MCP endpoint from other containers:** `http://claude-code-app-dev:8080/mcp`
-- **Bind-mounts:** `auth-proxy/`, `mcp-server/`, `scripts/` for live editing
+- **Bind-mounts:** `auth-proxy/`, `mcp-server/`, `scripts/` for live editing (no rebuild needed for JS/script changes, just restart the service)
 
 ## Architecture
 
@@ -93,11 +93,13 @@ External (:8080)
 3. MCP server spawns `claude -p -c` process for each query
 4. Response streamed back as JSON-RPC result
 
-**Process Management:**
+**Process Management (s6-overlay):**
 - s6-overlay manages all services with auto-restart
 - Service definitions in `s6-overlay/s6-rc.d/`
-- Startup order: `init-permissions` → `sshd` → `ttyd`, `auth-proxy`, `mcp-server`, `wetty`, `session-cleanup`
+- Startup order: `init-permissions` (oneshot) → `sshd` → `ttyd`, `auth-proxy`, `mcp-server`, `wetty`, `session-cleanup` (all longrun)
 - Services run as `claude` user except sshd (root)
+- Two terminal backends exist: **ttyd** (direct PTY, port 7681) and **wetty** (SSH-based, port 3000). Auth proxy routes to ttyd by default.
+- To modify a service: edit the `run` script in `s6-overlay/s6-rc.d/<service>/`, then rebuild or restart the service inside the container
 
 ## Debugging
 
@@ -106,17 +108,18 @@ External (:8080)
 docker compose logs -f
 
 # View specific service logs inside container
-docker compose exec claude-code s6-rc -a list   # List services
-docker compose exec claude-code cat /run/service/auth-proxy/supervise/status
+docker exec claude-code-app-dev s6-rc -a list   # List services
 
 # Check MCP server directly (from inside container)
-docker compose exec claude-code curl -s http://localhost:9090/mcp/status
+docker exec claude-code-app-dev curl -s http://localhost:9090/mcp/status
 
 # Check WebSocket connections
-docker compose exec claude-code curl -s http://localhost:8080/internal/ws-status
+docker exec claude-code-app-dev curl -s http://localhost:8080/internal/ws-status
 
-# Restart a specific service
-docker compose exec claude-code s6-svc -r /run/service/mcp-server
+# Restart a specific service inside container
+docker exec claude-code-app-dev s6-svc -r /run/service/mcp-server
+docker exec claude-code-app-dev s6-svc -r /run/service/auth-proxy
+docker exec claude-code-app-dev s6-svc -r /run/service/ttyd
 ```
 
 ## MCP Server
@@ -216,6 +219,7 @@ Use MCP's `workdir` parameter to share history with web UI: `"workdir": "/home/c
 | `CLAUDE_SESSION_TTL` | No | `1800` | Seconds before disconnected sessions cleanup |
 | `PROXY_PORT` | No | `8080` | Auth proxy external port |
 | `TTYD_PORT` | No | `7681` | Internal ttyd port |
+| `WETTY_PORT` | No | `3000` | Internal wetty port |
 | `MCP_PORT` | No | `9090` | Internal MCP server port |
 
 ## Data Persistence
@@ -232,9 +236,26 @@ Both `.claude/` and `.claude.json` must be mounted. Web login sessions are in-me
 
 ## Container Details
 
-- User: `claude` (UID 999), member of `docker` group
+- User: `claude` (auto-assigned UID), member of `docker` group (GID 999)
 - Workdir: `/home/claude/workspace`, MCP: `/home/claude/workspace/mcp`
 - Memory: limited to 1GB, Node heap limited to 64MB (`NODE_OPTIONS="--max-old-space-size=64"`)
+
+## CI/CD
+
+GitHub Actions workflow (`.github/workflows/docker-build.yml`) builds multi-arch images (amd64/arm64) on push to `main` or version tags. Images published to `ghcr.io/worph/claude-code-container`.
+
+```bash
+# Build locally
+docker build -t claude-code-container .
+
+# Pull pre-built
+docker pull ghcr.io/worph/claude-code-container:main
+```
+
+## Dockerfile Build Stages
+
+1. **builder** (node:22-bookworm): Compiles ttyd 1.7.7 from source
+2. **runtime** (node:22-slim): Installs s6-overlay, runtime deps, Docker CLI, wetty, abduco, Claude Code CLI, then copies auth-proxy and mcp-server with `npm install --omit=dev`
 
 ## Error Codes (MCP)
 

@@ -72,7 +72,7 @@ This document describes how to manually test the Claude Code Container, with foc
 
 **Steps:**
 1. Complete Test 1
-2. Run: `docker compose restart claude-code`
+2. Run: `docker compose restart`
 3. Wait for container to start (~5 seconds)
 4. Refresh browser
 
@@ -85,7 +85,7 @@ This document describes how to manually test the Claude Code Container, with foc
 **Steps:**
 Run inside container:
 ```bash
-docker compose exec claude-code ps aux | grep -E '(abduco|claude)' | grep -v grep
+docker exec claude-code-app-dev ps aux | grep -E '(abduco|claude)' | grep -v grep
 ```
 
 **Expected with active session:**
@@ -129,25 +129,25 @@ If you encounter a black screen:
 ### Black screen after refresh
 - Verify only one abduco client: Test 7
 - Check script permissions: `ls -la /home/claude/scripts/`
-- Check logs: `docker compose logs claude-code`
+- Check logs: `docker compose logs`
 
 ### "Permission denied" error
 ```bash
-docker compose exec claude-code chmod +x /home/claude/scripts/*.sh
-docker compose exec claude-code chown claude:claude /home/claude/scripts/*
+docker exec claude-code-app-dev chmod +x /home/claude/scripts/*.sh
+docker exec claude-code-app-dev chown claude:claude /home/claude/scripts/*
 ```
 
 ### Session not persisting
 - Verify abduco socket exists:
   ```bash
-  docker compose exec claude-code ls -la /home/claude/.abduco/
+  docker exec claude-code-app-dev ls -la /home/claude/.abduco/
   ```
 - Should show: `claude-session@<hostname>`
 
 ### Multiple clients causing issues
 ```bash
 # Kill all abduco processes and restart
-docker compose exec claude-code pkill -9 -f abduco
+docker exec claude-code-app-dev pkill -9 -f abduco
 # Then refresh browser
 ```
 
