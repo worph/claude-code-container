@@ -37,7 +37,10 @@ trigger_redraw() {
 
 # Check if an abduco session is actually alive (not just a stale socket)
 session_is_alive() {
-    abduco -l 2>/dev/null | grep -q "$SESSION_NAME"
+    # First check if abduco lists it (with timeout to avoid hanging on stale sockets)
+    timeout 2 abduco -l 2>/dev/null | grep -q "$SESSION_NAME" || return 1
+    # Verify the abduco server process is actually running
+    pgrep -u "$(id -u)" -f "abduco.*$SESSION_NAME" >/dev/null 2>&1 || return 1
 }
 
 if session_is_alive; then
@@ -45,8 +48,8 @@ if session_is_alive; then
     trigger_redraw
     exec abduco -a "$SESSION_NAME"
 else
-    # No live session — clean up any stale socket and start fresh
-    rm -f "$SOCKET_PATH"
+    # No live session — clean up any stale sockets and start fresh
+    rm -f "$SOCKET_DIR"/${SESSION_NAME}@* 2>/dev/null
     trigger_redraw
     exec abduco -A "$SESSION_NAME" claude
 fi
