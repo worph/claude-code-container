@@ -140,7 +140,7 @@ The MCP (Model Context Protocol) server allows external Claude instances to inte
 
 | Tool | Description |
 |------|-------------|
-| `query_claude` | Send prompt to Claude Code. Params: `prompt` (required), `continueSession` (default: true), `workdir` (default: `/home/claude/workspace/mcp`), `timeout` (default: 120s), `chatId` (Telegram chat ID for permission prompts), `permissionCallbackUrl` (REST endpoint for permission prompts) |
+| `query_claude` | Send prompt to Claude Code. Params: `prompt` (required), `continueSession` (default: true), `workdir` (default: `/home/claude/workspace/mcp`), `timeout` (default: 120s), `chatId` (Telegram chat ID for permission prompts), `permissionCallbackUrl` (REST endpoint for permission prompts), `permission` (array of tools to allow without prompts, e.g. `["Bash", "Read"]`, maps to `--allowedTools`) |
 | `check_status` | Returns `{available, browserConnected, queryInProgress}` |
 
 ### Interactive Permission Prompts

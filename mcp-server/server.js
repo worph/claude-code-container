@@ -57,6 +57,11 @@ const TOOLS = [
                 permissionCallbackUrl: {
                     type: 'string',
                     description: 'URL of the permission REST endpoint (e.g., http://telegram-mcp:8080/api/permission). Required for permission prompts.'
+                },
+                permission: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'List of tools to allow without permission prompts (e.g. ["Bash", "Edit", "Read"]). Supports patterns like "Bash(git:*)".'
                 }
             },
             required: ['prompt']
@@ -222,6 +227,15 @@ async function handleQueryClaude(id, args, res, req) {
     // Working directory (default to MCP-specific workspace)
     const workdir = args.workdir || DEFAULT_MCP_WORKDIR;
 
+    // Allowed tools (--allowedTools)
+    const permission = Array.isArray(args.permission) ? args.permission : [];
+    if (permission.length > 0 && !permission.every(t => typeof t === 'string' && t.trim().length > 0)) {
+        queryInProgress = false;
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(jsonRpcError(id, JSONRPC_ERRORS.INVALID_PARAMS, 'permission must be an array of non-empty strings')));
+        return;
+    }
+
     // Permission prompts configuration
     const chatId = args.chatId;
     const permissionCallbackUrl = args.permissionCallbackUrl;
@@ -274,9 +288,22 @@ async function handleQueryClaude(id, args, res, req) {
         }
     }
 
-    cmdArgs.push(prompt);
+    // Add --allowedTools if permission list provided
+    // Note: --allowedTools is variadic so it must come after the prompt,
+    // or we must pass the prompt via stdin. We use the latter approach.
+    const useStdin = permission.length > 0;
+    if (permission.length > 0) {
+        cmdArgs.push('--allowedTools');
+        for (const tool of permission) {
+            cmdArgs.push(tool.trim());
+        }
+    }
 
-    console.log(`[MCP] Starting query (timeout: ${timeoutSec}s, workdir: ${workdir}, permissions: ${enablePermissionPrompts}): claude ${cmdArgs.slice(0, -1).join(' ')} '${prompt.substring(0, 50)}'...`);
+    if (!useStdin) {
+        cmdArgs.push(prompt);
+    }
+
+    console.log(`[MCP] Starting query (timeout: ${timeoutSec}s, workdir: ${workdir}, permissions: ${enablePermissionPrompts}, allowedTools: [${permission.join(', ')}]): claude ${cmdArgs.slice(0, -1).join(' ')} '${prompt.substring(0, 50)}'...`);
 
     // Build environment
     const env = {
@@ -293,8 +320,13 @@ async function handleQueryClaude(id, args, res, req) {
         stdio: ['pipe', 'pipe', 'pipe']
     });
 
-    // Close stdin immediately since we're not sending any input
-    claude.stdin.end();
+    // If using stdin for prompt (when --allowedTools is present), write it then close
+    if (useStdin) {
+        claude.stdin.write(prompt);
+        claude.stdin.end();
+    } else {
+        claude.stdin.end();
+    }
 
     let outputBuffer = '';
     let stderrBuffer = '';
