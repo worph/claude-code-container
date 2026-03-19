@@ -44,6 +44,16 @@ docker compose down
 - **Docker network:** `mcp-network` (shared with telegram-mcp)
 - **MCP endpoint from other containers:** `http://claude-code-app-dev:8080/mcp`
 - **Bind-mounts:** `auth-proxy/`, `mcp-server/`, `scripts/` for live editing (no rebuild needed for JS/script changes, just restart the service)
+- **No test suite or linter** — there are no tests or linting configured for this project. Validate changes manually via the debugging commands below.
+
+## Editing Node.js Code
+
+Both `auth-proxy/` and `mcp-server/` are plain CommonJS Node.js (no TypeScript, no build step). The only runtime dependency is `http-proxy` in auth-proxy; mcp-server has zero npm dependencies.
+
+To iterate on JS changes:
+1. Edit the file on the host (bind-mounted)
+2. Restart the specific service: `docker exec claude-code-app-dev s6-svc -r /run/service/<service-name>`
+3. Check logs: `docker compose logs -f`
 
 ## Architecture
 
@@ -256,7 +266,6 @@ docker pull ghcr.io/worph/claude-code-container:main
 
 1. **builder** (node:22-bookworm): Compiles ttyd 1.7.7 from source
 2. **runtime** (node:22-slim): Installs s6-overlay, runtime deps, Docker CLI, wetty, abduco, Claude Code CLI, then copies auth-proxy and mcp-server with `npm install --omit=dev`
-
 ## Error Codes (MCP)
 
 | Code | HTTP | Description |
