@@ -16,6 +16,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - AUTH_PASSWORD=${AUTH_PASSWORD}
       - CLAUDE_SESSION_TTL=1800
+      - DISCOVERY_PORT=9099
 
     volumes:
       - workspace-dev:/home/claude/workspace
@@ -35,10 +36,13 @@ services:
 
     networks:
       - mcp-network
+      - mcp-net
 
 volumes:
   workspace-dev:
 
 networks:
   mcp-network:
+    external: true
+  mcp-net:
     external: true

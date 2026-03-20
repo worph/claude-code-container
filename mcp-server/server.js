@@ -513,4 +513,18 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, '127.0.0.1', () => {
     console.log(`[MCP] Server listening on 127.0.0.1:${PORT}`);
+
+    // Beacon discovery
+    const { createDiscoveryResponder } = require('./mcp-announce.js');
+    const discoverOpts = {
+      name: 'claude-code',
+      description: 'Claude Code agent — send prompts to Claude Code and get responses',
+      tools: TOOLS,
+      port: 8080,
+      listenPort: parseInt(process.env.DISCOVERY_PORT || '9099'),
+    };
+    if (process.env.AUTH_PASSWORD) {
+      discoverOpts.auth = { type: 'bearer', token: process.env.AUTH_PASSWORD };
+    }
+    createDiscoveryResponder(discoverOpts);
 });
