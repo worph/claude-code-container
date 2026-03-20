@@ -12,10 +12,11 @@ log() {
     echo "[session-cleanup] $*"
 }
 
-# Check if any clients are connected to ttyd (websocket on port 7681)
+# Check if any clients are connected via auth-proxy WebSocket tracking
 has_ttyd_clients() {
-    # Count ESTABLISHED connections to port 7681 (excluding LISTEN)
-    CONN_COUNT=$(ss -tn state established "( sport = :7681 )" 2>/dev/null | grep -c "ESTAB" || echo "0")
+    # Use auth-proxy's internal endpoint which tracks active WebSocket connections
+    CONN_COUNT=$(curl -s http://localhost:8080/internal/ws-status 2>/dev/null | sed -n 's/.*"count":\([0-9]*\).*/\1/p')
+    CONN_COUNT="${CONN_COUNT:-0}"
     [ "$CONN_COUNT" -gt 0 ]
 }
 
