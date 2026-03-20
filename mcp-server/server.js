@@ -1,5 +1,5 @@
 const http = require('http');
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 
 const PORT = process.env.MCP_PORT || 9090;
@@ -526,5 +526,28 @@ server.listen(PORT, '127.0.0.1', () => {
     if (process.env.AUTH_PASSWORD) {
       discoverOpts.auth = { type: 'bearer', token: process.env.AUTH_PASSWORD };
     }
+
+    // Track registered beacon URLs to avoid re-running `claude mcp add`
+    const registeredBeacons = new Set();
+
+    discoverOpts.onDiscovery = ({ mcp_url }) => {
+      if (!mcp_url || registeredBeacons.has(mcp_url)) return;
+      console.log(`[MCP] Beacon discovered with mcp_url: ${mcp_url}, registering...`);
+      try {
+        execSync(
+          `claude mcp add beacon --transport http ${mcp_url}`,
+          {
+            env: { ...process.env, HOME: '/home/claude', USER: 'claude', PATH: '/home/claude/.local/bin:' + (process.env.PATH || '') },
+            stdio: 'pipe',
+            timeout: 10000,
+          }
+        );
+        registeredBeacons.add(mcp_url);
+        console.log(`[MCP] Beacon registered successfully: ${mcp_url}`);
+      } catch (err) {
+        console.error(`[MCP] Failed to register beacon: ${err.message}`);
+      }
+    };
+
     createDiscoveryResponder(discoverOpts);
 });
