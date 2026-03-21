@@ -1,13 +1,13 @@
 # Claude Code Container
 
-A Docker container that runs [Claude Code](https://github.com/anthropics/claude-code) (Anthropic's CLI for Claude) with [ttyd](https://github.com/tsl0922/ttyd) for web-based terminal access (with built-in basic auth), plus an MCP server for programmatic access.
+A Docker container that runs [Claude Code](https://github.com/anthropics/claude-code) (Anthropic's CLI for Claude) with [ttyd](https://github.com/tsl0922/ttyd) for web-based terminal access, session-based web authentication via Caddy forward_auth, plus an MCP server for programmatic access.
 
 ## Features
 
 - **Web Terminal** - Browser-based terminal access to Claude Code via ttyd
 - **MCP Server** - JSON-RPC API for programmatic access from other Claude instances
 - **Session Persistence** - Reconnect to your session via abduco
-- **Authentication** - HTTP basic auth for web UI, Bearer token for MCP
+- **Authentication** - Session-based login for web UI (via Caddy forward_auth), Bearer token for MCP
 - **Multi-architecture** - Support for amd64 and arm64
 - **Persistent Storage** - Workspace and Claude config volumes
 - **Docker Access** - Optional Docker socket mounting
@@ -91,28 +91,28 @@ Update telegram-mcp's `config.json` target URL accordingly:
 ## Architecture
 
 ```
-Browser ──→ ttyd :8080 (basic auth, direct WebSocket)
-API     ──→ mcp-server :9090 (Bearer auth, JSON-RPC)
+Browser ──→ Caddy :8080 (forward_auth) ──→ ttyd :8080 (no auth, internal)
+API     ──→ mcp-server :9090 (Bearer auth, JSON-RPC, docker network only)
 
-   ┌──────────────────────┐       ┌──────────────────────┐
-   │    ttyd :8080        │       │  mcp-server :9090    │
-   │  (basic auth -c)     │       │  (Bearer auth)       │
-   │                      │       │                      │
-   │  Web Terminal        │       │  JSON-RPC 2.0 API    │
-   │        │             │       │        │             │
-   │        ▼             │       │        ▼             │
-   │  claude (live)       │       │  claude -p -c "..."  │
-   │  via abduco          │       │  (one-shot)          │
-   └──────────┬───────────┘       └──────────┬───────────┘
-              │                              │
-              └──────────┬───────────────────┘
-                         ▼
-              ~/.claude/projects/ (history)
-              /home/claude/workspace (files)
+   ┌─────────────────┐   ┌──────────────────────┐       ┌──────────────────────┐
+   │  Caddy sidecar  │   │    ttyd :8080        │       │  mcp-server :9090    │
+   │  (session auth) │──→│  (no auth, internal)  │       │  (Bearer auth)       │
+   │  host :8080     │   │                      │       │                      │
+   └─────────────────┘   │  Web Terminal        │       │  JSON-RPC 2.0 API    │
+                         │        │             │       │        │             │
+                         │        ▼             │       │        ▼             │
+                         │  claude (live)       │       │  claude -p -c "..."  │
+                         │  via abduco          │       │  (one-shot)          │
+                         └──────────┬───────────┘       └──────────┬───────────┘
+                                    │                              │
+                                    └──────────┬───────────────────┘
+                                               ▼
+                                    ~/.claude/projects/ (history)
+                                    /home/claude/workspace (files)
 ```
 
 **Two ways to interact:**
-- **Web Terminal**: Interactive session at `http://localhost:8080` (basic auth: `claude` / `AUTH_PASSWORD`)
+- **Web Terminal**: Interactive session at `http://localhost:8080` (session login at `/login`, password: `AUTH_PASSWORD`)
 - **MCP Server**: Programmatic access at `http://localhost:9090/mcp` (Bearer token)
 
 ## MCP Server
@@ -197,12 +197,13 @@ To share history, specify `workdir` in your query:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `ANTHROPIC_API_KEY` | Anthropic API key (or leave empty for OAuth) | - |
-| `AUTH_PASSWORD` | Password for web login (basic auth) & MCP Bearer token | - |
+| `AUTH_PASSWORD` | Password for web login (session auth) & MCP Bearer token | - |
 | `MCP_ENABLED` | Enable/disable MCP server | `true` |
 | `PROXY_PORT` | ttyd external port | `8080` |
 | `WETTY_PORT` | Internal wetty port | `3000` |
 | `MCP_PORT` | Internal MCP server port | `9090` |
 | `CLAUDE_SESSION_TTL` | Session cleanup timeout (seconds) | `1800` |
+| `DISCOVERY_PORT` | UDP port for beacon auto-discovery | `9099` |
 
 ## Data Persistence
 
@@ -276,7 +277,9 @@ services:
 ├── docker-compose.yml      # Compose configuration
 ├── .env.example            # Environment template
 ├── mcp-server/
-│   ├── server.js           # MCP JSON-RPC server
+│   ├── server.js           # MCP JSON-RPC server + login/auth endpoints
+│   ├── login.html          # Password-only login page for Caddy forward_auth
+│   ├── mcp-announce.js     # UDP beacon auto-discovery responder
 │   └── permission-mcp.js   # Stdio MCP server for permission prompts
 ├── mcp-client.js           # Stdio-to-HTTP bridge for MCP
 ├── scripts/

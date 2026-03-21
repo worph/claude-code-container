@@ -90,7 +90,7 @@ docker exec claude-code-app-dev ps aux | grep -E '(abduco|claude)' | grep -v gre
 
 **Expected with active session:**
 ```
-claude  ... abduco -A claude-session claude   # Server (PPID=1)
+claude  ... abduco -n claude-session claude   # Server (PPID=1, detached)
 claude  ... claude                             # Claude Code process
 claude  ... abduco -a claude-session           # Client (one only)
 ```
@@ -154,7 +154,7 @@ docker exec claude-code-app-dev pkill -9 -f abduco
 ## Architecture Notes
 
 ```
-Browser → ttyd (:8080, basic auth) → claude-session.sh → abduco → claude
+Browser → Caddy (:8080, session auth) → ttyd (no auth, internal) → claude-session.sh → abduco → claude
 ```
 
 - **abduco server**: Keeps Claude running when clients disconnect

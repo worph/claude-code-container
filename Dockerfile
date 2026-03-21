@@ -56,8 +56,7 @@ COPY --from=builder /usr/local/bin/ttyd /usr/local/bin/ttyd
 RUN groupadd -g 999 docker || true && \
     useradd -m -s /bin/bash -G docker claude && \
     mkdir -p /home/claude/workspace/mcp && \
-    chown -R claude:claude /home/claude && \
-    echo "claude ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+    chown -R claude:claude /home/claude
 
 # Configure SSH for local connections only
 RUN sed -i 's/#PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config && \

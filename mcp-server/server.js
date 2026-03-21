@@ -1,11 +1,23 @@
 const http = require('http');
 const crypto = require('crypto');
-const { spawn, execSync } = require('child_process');
+const { spawn, execSync, execFileSync } = require('child_process');
 const fs = require('fs');
 
 const PORT = process.env.MCP_PORT || 9090;
 const AUTH_PASSWORD = process.env.AUTH_PASSWORD || '';
 const DEFAULT_MCP_WORKDIR = '/home/claude/workspace/mcp';
+
+// Constant-time string comparison to prevent timing attacks
+function safeCompare(a, b) {
+    if (typeof a !== 'string' || typeof b !== 'string') return false;
+    const bufA = Buffer.from(a);
+    const bufB = Buffer.from(b);
+    if (bufA.length !== bufB.length) {
+        crypto.timingSafeEqual(bufA, bufA);
+        return false;
+    }
+    return crypto.timingSafeEqual(bufA, bufB);
+}
 
 // Session store for web login (cookie-based auth via Caddy forward_auth)
 const sessions = new Map(); // token -> { created }
@@ -160,7 +172,7 @@ function isAuthorized(req) {
     }
 
     const token = authHeader.substring(7);
-    return token === AUTH_PASSWORD;
+    return safeCompare(token, AUTH_PASSWORD);
 }
 
 // Handle initialize method
@@ -465,7 +477,7 @@ async function handleRequest(req, res) {
             res.end(JSON.stringify({ error: 'Invalid JSON' }));
             return;
         }
-        if (AUTH_PASSWORD && body.password === AUTH_PASSWORD) {
+        if (AUTH_PASSWORD && safeCompare(body.password, AUTH_PASSWORD)) {
             const token = createSession();
             res.writeHead(200, {
                 'Content-Type': 'application/json',
@@ -612,10 +624,16 @@ server.listen(PORT, '0.0.0.0', () => {
 
     discoverOpts.onDiscovery = ({ mcp_url }) => {
       if (!mcp_url || registeredBeacons.has(mcp_url)) return;
+      // Validate mcp_url is a real http(s) URL before passing to exec
+      try {
+        const parsed = new URL(mcp_url);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return;
+      } catch { return; }
       console.log(`[MCP] Beacon discovered with mcp_url: ${mcp_url}, registering...`);
       try {
-        execSync(
-          `claude mcp add beacon --transport http ${mcp_url}`,
+        execFileSync(
+          'claude',
+          ['mcp', 'add', 'beacon', '--transport', 'http', mcp_url],
           {
             env: { ...process.env, HOME: '/home/claude', USER: 'claude', PATH: '/home/claude/.local/bin:' + (process.env.PATH || '') },
             stdio: 'pipe',

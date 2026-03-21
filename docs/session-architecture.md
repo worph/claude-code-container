@@ -7,7 +7,8 @@ how session persistence works via abduco, and known issues with disconnection ha
 
 | Component | Role | Port | Process owner |
 |---|---|---|---|
-| **ttyd** (C binary) | WebSocket-to-PTY bridge with basic auth | 8080 (external) | root |
+| **Caddy** (docker-proxy) | Reverse proxy with forward_auth (session cookie check via MCP `/auth`) | 8080 (external) | - |
+| **ttyd** (C binary) | WebSocket-to-PTY bridge (no built-in auth — auth handled by Caddy) | 8080 (internal) | root |
 | **su** | Privilege switch to `claude` user | - | root → claude |
 | **claude-session.sh** | Session orchestrator: create or attach abduco session | - | claude |
 | **abduco** | Detachable PTY multiplexer (like tmux, but minimal) | - | claude |
@@ -22,22 +23,37 @@ Browser (user)
 │
 ▼
 ┌──────────────────────────────────────────────────┐
+│  CADDY  (docker-proxy sidecar, host :8080)       │
+│                                                  │
+│  1. Browser connects to Caddy on host :8080      │
+│  2. Caddy calls forward_auth → MCP server /auth  │
+│  3. If no valid session cookie → redirect /login │
+│  4. User submits password → MCP sets cookie      │
+│  5. On valid session, Caddy proxies to ttyd      │
+└──────────────┬───────────────────────────────────┘
+               │
+               │  HTTP reverse proxy
+               │
+               ▼
+┌──────────────────────────────────────────────────┐
 │  TTYD  (C binary, s6-managed service)            │
 │                                                  │
 │  Started by s6 with:                             │
-│    ttyd -W -p 8080 -c claude:$AUTH_PASSWORD \    │
+│    ttyd -W -p 8080 \                             │
 │      -t reconnect=3 \                            │
 │      -P 30 \                                     │
 │      su - claude -c "claude-session.sh"          │
 │                                                  │
-│  1. Browser connects, basic auth prompt shown    │
-│  2. On auth success, allocates a new PTY         │
+│  Note: No built-in auth (-c flag removed).       │
+│  Authentication is handled by Caddy upstream.    │
+│                                                  │
+│  1. Receives proxied connection from Caddy       │
+│  2. Allocates a new PTY                          │
 │  3. Forks the configured command on that PTY     │
 │  4. Bridges WS data ↔ PTY data                   │
 │                                                  │
 │  Flags:                                          │
 │    -W        = writable (allow input)            │
-│    -c user:pass = HTTP basic authentication      │
 │    -t reconnect=3  = client auto-reconnects      │
 │                      after 3 seconds             │
 │    -P 30     = ping interval 30s (keepalive)     │
@@ -61,11 +77,14 @@ Browser (user)
 │                                                  │
 │  if session_is_alive("claude-session"):           │
 │  ├── YES: exec abduco -a claude-session          │
-│  │        (attach as additional client)           │
+│  │        (attach as client to existing session)  │
 │  │                                               │
 │  └── NO:  clean stale sockets                    │
-│           exec abduco -A claude-session claude    │
-│           (create new session, run claude)        │
+│           abduco -n claude-session claude         │
+│           (create new DETACHED session)           │
+│           sleep 0.3  (wait for socket)            │
+│           exec abduco -a claude-session           │
+│           (attach as client)                      │
 │                                                  │
 │  In both cases, trigger_redraw() is called       │
 │  in the background to send SIGWINCH to claude    │
@@ -78,19 +97,22 @@ Browser (user)
 ┌──────────────────────────────────────────────────┐
 │  ABDUCO                                          │
 │                                                  │
-│  Two modes:                                      │
+│  Two modes used by claude-session.sh:            │
 │                                                  │
-│  abduco -A (create + attach)                     │
-│  ├── Server process: holds the master PTY        │
-│  │   where claude runs. Stays alive even when    │
-│  │   all clients detach.                         │
-│  └── Client process: connects the current        │
-│      terminal (ttyd's PTY) to the session.       │
+│  abduco -n (create detached)                     │
+│  └── Server process only: holds the master PTY   │
+│      where claude runs. Stays alive even when    │
+│      all clients detach. No client is attached   │
+│      at creation time.                           │
 │                                                  │
 │  abduco -a (attach only)                         │
 │  └── Client process only: bridges the current    │
-│      terminal to the existing server session.    │
+│      terminal (ttyd's PTY) to the server session.│
 │      Multiple clients can attach simultaneously. │
+│                                                  │
+│  The two-step pattern (create detached, then     │
+│  attach) ensures ttyd killing the client does    │
+│  NOT kill the server or claude.                  │
 │                                                  │
 │  Abduco is the key to session persistence.       │
 │  The server process + claude survive browser     │
@@ -117,26 +139,28 @@ Browser (user)
 
 ```
 s6-supervise (ttyd)
-└── ttyd -W -p 8080 -c claude:*** ...
-    └── su - claude -c claude-session.sh     ← ttyd's PTY (pts/0)
-        └── abduco -a claude-session          ← attach client (exec'd from claude-session.sh)
+└── ttyd -W -p 8080 ...                         ← no -c flag; auth handled by Caddy upstream
+    └── su - claude -c claude-session.sh         ← ttyd's PTY (pts/0)
+        └── abduco -a claude-session              ← attach client (exec'd from claude-session.sh)
 
-abduco -A claude-session claude               ← abduco server (ppid=1, detached)
-└── claude                                    ← the actual CLI (on abduco's internal PTY, pts/1)
+abduco -n claude-session claude                  ← abduco server (ppid=1, created detached)
+└── claude                                       ← the actual CLI (on abduco's internal PTY, pts/1)
 ```
 
 ## Lifecycle: First Connection
 
 ```
-1. Browser opens WS to :8080
-2. ttyd prompts for basic auth (username: claude, password: AUTH_PASSWORD)
-3. ttyd allocates PTY pts/0, forks: su - claude -c claude-session.sh
-4. claude-session.sh checks: no abduco session exists
-5. Runs: exec abduco -A claude-session claude
-6. abduco creates server process (detaches to ppid=1)
-7. abduco creates client process (on pts/0, connected to ttyd)
-8. claude starts inside abduco's internal PTY
-9. User sees Claude Code prompt in browser
+1. Browser opens connection to Caddy on :8080
+2. Caddy calls forward_auth → MCP server /auth → no session cookie → redirect to /login
+3. User enters password on /login page → MCP server sets session cookie → redirect to /
+4. Caddy validates session cookie via /auth → proxies to ttyd
+5. ttyd allocates PTY pts/0, forks: su - claude -c claude-session.sh
+6. claude-session.sh checks: no abduco session exists
+7. Runs: abduco -n claude-session claude (creates detached server + claude)
+8. abduco server process detaches to ppid=1
+9. claude starts inside abduco's internal PTY
+10. Runs: exec abduco -a claude-session (attaches client on pts/0)
+11. User sees Claude Code prompt in browser
 ```
 
 ## Lifecycle: Disconnection
@@ -157,9 +181,9 @@ Still alive:
 ## Lifecycle: Reconnection
 
 ```
-1. Browser opens new WS to :8080
-2. ttyd validates basic auth credentials
-3. ttyd allocates NEW PTY pts/2, forks new: su - claude -c claude-session.sh
+1. Browser opens new connection to Caddy on :8080
+2. Caddy validates session cookie via forward_auth → /auth
+3. Caddy proxies to ttyd; ttyd allocates NEW PTY pts/2, forks new: su - claude -c claude-session.sh
 4. claude-session.sh checks: abduco session "claude-session" exists and is alive
 5. Calls trigger_redraw() in background (will send SIGWINCH to claude)
 6. Runs: exec abduco -a claude-session
@@ -215,4 +239,4 @@ after TTL, but does not clean up stale attach clients or zombies.
 | `MCP_PORT` | 9090 | MCP server listen port |
 | ttyd `-t reconnect=3` | 3 seconds | Client-side auto-reconnect delay |
 | ttyd `-P 30` | 30 seconds | WebSocket ping interval |
-| ttyd `-c claude:$AUTH_PASSWORD` | - | Basic auth credentials (skipped if AUTH_PASSWORD unset) |
+| Caddy forward_auth → `/auth` | - | Session cookie validation (auth handled by MCP server, not ttyd) |

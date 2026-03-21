@@ -39,7 +39,7 @@ docker compose down
 ```
 
 - **Container name:** `claude-code-app-dev` (+ `claude-code-caddy` sidecar)
-- **Ports:** `8080` (host) → Caddy → ttyd (basic auth), `9090` (host) → MCP server (Bearer auth)
+- **Ports:** `8080` (host) → Caddy (session auth via forward_auth) → ttyd (no auth, internal). MCP `:9090` is only reachable on the docker network, not exposed to the host.
 - **Docker networks:** `mcp-network` and `mcp-net` (both external, shared with telegram-mcp and beacon aggregator)
 - **MCP endpoint from other containers:** `http://claude-code-app-dev:9090/mcp`
 - **Bind-mounts:** `mcp-server/`, `scripts/` for live editing (no rebuild needed for JS/script changes, just restart the service)
@@ -57,12 +57,12 @@ To iterate on JS changes:
 ## Architecture
 
 ```
-Browser ──→ Caddy :8080 (basic auth) ──→ ttyd :8080 (no auth, internal)
-API     ──→ mcp-server :9090 (Bearer auth, JSON-RPC)
+Browser ──→ Caddy :8080 (forward_auth / session cookie) ──→ ttyd :8080 (no auth, internal)
+API     ──→ mcp-server :9090 (Bearer auth, JSON-RPC, docker network only)
 
 ┌─────────────────┐   ┌──────────────────────────┐  ┌──────────────────────────┐
 │  Caddy sidecar  │   │     ttyd :8080           │  │  mcp-server :9090        │
-│  (basic auth)   │──→│  (no auth, internal)     │  │  (Bearer auth)           │
+│  (session auth) │──→│  (no auth, internal)     │  │  (Bearer auth)           │
 │  host :8080     │   │                          │  │                          │
 └─────────────────┘   │  Interactive TTY         │  │  JSON-RPC 2.0 API        │
                       │         │                │  │         │                │
@@ -82,15 +82,17 @@ API     ──→ mcp-server :9090 (Bearer auth, JSON-RPC)
 ```
 
 **The container itself has no web authentication.** Auth is handled by an external reverse proxy:
-- **Dev stack:** Caddy sidecar in docker-compose (basic auth)
+- **Dev stack:** Caddy docker-proxy sidecar in docker-compose (session auth via forward_auth to MCP server's `/auth` endpoint)
 - **Production:** External Caddy with Docker label plugin
 
 **Web UI Flow:**
 1. Browser connects to Caddy on host port 8080
-2. Caddy prompts for basic auth (username: `claude`, password: `AUTH_PASSWORD`)
-3. Caddy proxies to ttyd inside the container (no auth, internal only)
-4. ttyd provides terminal running Claude Code as the `claude` user
-5. Session persists via abduco for reconnection
+2. Caddy calls forward_auth to MCP server's `/auth` endpoint (checks session cookie)
+3. If no valid session, user is redirected to `/login` page (password-only form)
+4. On successful login, MCP server sets a session cookie and redirects to `/`
+5. Caddy proxies to ttyd inside the container (no auth, internal only)
+6. ttyd provides terminal running Claude Code as the `claude` user
+7. Session persists via abduco for reconnection
 
 **MCP Flow:**
 1. External client sends JSON-RPC request to `:9090/mcp` with Bearer token
@@ -203,13 +205,14 @@ Use MCP's `workdir` parameter to share history with web UI: `"workdir": "/home/c
 | `mcp-server/server.js` | JSON-RPC 2.0 server, spawns `claude -p -c` processes, tracks query state |
 | `mcp-server/permission-mcp.js` | Stdio MCP server for permission prompts, forwards to telegram-mcp |
 | `mcp-server/mcp-announce.js` | UDP discovery responder for beacon protocol auto-registration |
+| `mcp-server/login.html` | Password-only login page served by MCP server for Caddy forward_auth flow |
 | `mcp-client.js` | Stdio-to-HTTP bridge for Claude Code MCP client integration |
 | `scripts/claude-session.sh` | abduco wrapper: kills existing clients, triggers SIGWINCH for redraw |
 | `s6-overlay/s6-rc.d/` | Service definitions (oneshot: init-permissions; longrun: others) |
 
 ## Authentication
 
-- **Web UI**: No built-in auth — the container exposes ttyd without authentication. In the dev stack, a Caddy sidecar provides basic auth. In production, use an external reverse proxy (Caddy with Docker labels, Traefik, nginx, etc.).
+- **Web UI**: No built-in auth — the container exposes ttyd without authentication. In the dev stack, a Caddy docker-proxy sidecar provides session-based auth via forward_auth (login page at `/login`, session cookie validated at `/auth`). In production, use an external reverse proxy (Caddy with Docker labels, Traefik, nginx, etc.).
 - **MCP**: `Authorization: Bearer <AUTH_PASSWORD>` header (self-authenticated)
 - `AUTH_PASSWORD` is used by Caddy (dev stack) and the MCP server
 
@@ -218,7 +221,7 @@ Use MCP's `workdir` parameter to share history with web UI: `"workdir": "/home/c
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `ANTHROPIC_API_KEY` | No | - | Claude API key. Leave empty for OAuth |
-| `AUTH_PASSWORD` | No | - | MCP Bearer token. Also used by Caddy sidecar (dev stack) for basic auth. |
+| `AUTH_PASSWORD` | No | - | MCP Bearer token. Also used by MCP server's login page and Caddy forward_auth (dev stack). |
 | `MCP_ENABLED` | No | `true` | Enable/disable MCP server for programmatic access |
 | `CLAUDE_SESSION_TTL` | No | `1800` | Seconds before disconnected sessions cleanup |
 | `PROXY_PORT` | No | `8080` | ttyd external port |
