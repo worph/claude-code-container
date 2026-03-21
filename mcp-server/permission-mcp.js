@@ -210,8 +210,13 @@ process.stdin.on('end', () => {
         try {
             const request = JSON.parse(buffer);
             handleRequest(request).then(response => {
-                sendResponse(response);
+                if (response !== null) {
+                    sendResponse(response);
+                }
                 process.exit(0);
+            }).catch(e => {
+                sendResponse(jsonRpcError(null, -32603, `Internal error: ${e.message}`));
+                process.exit(1);
             });
         } catch (e) {
             sendResponse(jsonRpcError(null, -32700, `Parse error: ${e.message}`));

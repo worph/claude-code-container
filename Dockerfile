@@ -31,9 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libjson-c5 libwebsockets17 libwebsockets-evlib-uv libuv1 \
     git curl vim ca-certificates sudo jq htop \
     dnsutils iproute2 iputils-ping traceroute lsof \
-    openssh-client openssh-server ncdu rsync python3 \
-    && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /run/sshd
+    && rm -rf /var/lib/apt/lists/*
 
 # Install yq
 RUN curl -fsSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_$(dpkg --print-architecture) \
@@ -58,16 +56,9 @@ RUN groupadd -g 999 docker || true && \
     mkdir -p /home/claude/workspace/mcp && \
     chown -R claude:claude /home/claude
 
-# Configure SSH for local connections only
-RUN sed -i 's/#PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config && \
-    sed -i 's/#PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config && \
-    echo "ListenAddress 127.0.0.1" >> /etc/ssh/sshd_config
-
-# Install wetty (needs build tools for node-pty) and compile abduco for session persistence
+# Compile abduco for session persistence
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential python3 procps \
-    && npm install -g wetty \
-    && npm cache clean --force \
+    build-essential procps \
     && git clone --depth 1 https://github.com/martanne/abduco.git /tmp/abduco \
     && cd /tmp/abduco \
     && ./configure && make && make install \
@@ -102,7 +93,6 @@ EXPOSE 8080 9090
 ENV ANTHROPIC_API_KEY="" \
     AUTH_PASSWORD="" \
     PROXY_PORT=8080 \
-    WETTY_PORT=3000 \
     MCP_PORT=9090 \
     MCP_ENABLED=true \
     CLAUDE_SESSION_TTL=1800 \

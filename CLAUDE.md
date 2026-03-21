@@ -103,9 +103,8 @@ API     ──→ mcp-server :9090 (Bearer auth, JSON-RPC, docker network only)
 **Process Management (s6-overlay):**
 - s6-overlay manages all services with auto-restart
 - Service definitions in `s6-overlay/s6-rc.d/`
-- Startup order: `init-permissions` (oneshot) → `sshd` → `ttyd`, `mcp-server`, `wetty`, `session-cleanup` (all longrun)
-- Services run as `claude` user except sshd (root)
-- Two terminal backends exist: **ttyd** (direct PTY, port 8080) and **wetty** (SSH-based, port 3000)
+- Startup order: `init-permissions` (oneshot) → `ttyd`, `mcp-server`, `session-cleanup` (all longrun)
+- Services run as `claude` user
 - To modify a service: edit the `run` script in `s6-overlay/s6-rc.d/<service>/`, then rebuild or restart the service inside the container
 
 ## Debugging
@@ -225,7 +224,6 @@ Use MCP's `workdir` parameter to share history with web UI: `"workdir": "/home/c
 | `MCP_ENABLED` | No | `true` | Enable/disable MCP server for programmatic access |
 | `CLAUDE_SESSION_TTL` | No | `1800` | Seconds before disconnected sessions cleanup |
 | `PROXY_PORT` | No | `8080` | ttyd external port |
-| `WETTY_PORT` | No | `3000` | Internal wetty port |
 | `MCP_PORT` | No | `9090` | Internal MCP server port |
 | `DISCOVERY_PORT` | No | `9099` | UDP port for beacon auto-discovery (MCP server announces itself to aggregators) |
 
@@ -266,7 +264,7 @@ docker pull ghcr.io/worph/claude-code-container:main
 ## Dockerfile Build Stages
 
 1. **builder** (node:22-bookworm): Compiles ttyd 1.7.7 from source
-2. **runtime** (node:22-slim): Installs s6-overlay, runtime deps, Docker CLI, wetty, abduco, Claude Code CLI, then copies mcp-server with `npm install --omit=dev`
+2. **runtime** (node:22-slim): Installs s6-overlay, runtime deps, Docker CLI, abduco, Claude Code CLI, then copies mcp-server with `npm install --omit=dev`
 ## Error Codes (MCP)
 
 | Code | HTTP | Description |

@@ -1,11 +1,19 @@
 const http = require('http');
 const crypto = require('crypto');
 const { spawn, execSync, execFileSync } = require('child_process');
+const path = require('path');
 const fs = require('fs');
 
 const PORT = process.env.MCP_PORT || 9090;
 const AUTH_PASSWORD = process.env.AUTH_PASSWORD || '';
 const DEFAULT_MCP_WORKDIR = '/home/claude/workspace/mcp';
+const MAX_OUTPUT_SIZE = 5 * 1024 * 1024; // 5MB buffer limit per query
+
+// Cache login page at startup
+let loginHtmlCache = null;
+try {
+    loginHtmlCache = fs.readFileSync('/app/mcp-server/login.html', 'utf8');
+} catch {}
 
 // Constant-time string comparison to prevent timing attacks
 function safeCompare(a, b) {
@@ -60,7 +68,6 @@ const JSONRPC_ERRORS = {
     INVALID_PARAMS: -32602,
     INTERNAL_ERROR: -32603,
     UNAUTHORIZED: -32001,
-    BROWSER_ACTIVE: -32002,
     QUERY_IN_PROGRESS: -32003,
     TIMEOUT: -32004
 };
@@ -249,7 +256,13 @@ async function handleQueryClaude(id, args, res, req) {
     const timeoutSec = typeof args.timeout === 'number' && args.timeout > 0 ? args.timeout : 120;
 
     // Working directory (default to MCP-specific workspace)
-    const workdir = args.workdir || DEFAULT_MCP_WORKDIR;
+    const workdir = path.resolve(args.workdir || DEFAULT_MCP_WORKDIR);
+    if (!workdir.startsWith('/home/claude/')) {
+        queryInProgress = false;
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(jsonRpcError(id, JSONRPC_ERRORS.INVALID_PARAMS, 'workdir must be under /home/claude/')));
+        return;
+    }
 
     // Allowed tools (--allowedTools)
     const permission = Array.isArray(args.permission) ? args.permission : [];
@@ -355,6 +368,7 @@ async function handleQueryClaude(id, args, res, req) {
     let outputBuffer = '';
     let stderrBuffer = '';
     let timedOut = false;
+    let responseSent = false;
 
     // Set up timeout
     const timeoutId = setTimeout(() => {
@@ -371,11 +385,15 @@ async function handleQueryClaude(id, args, res, req) {
     }, timeoutSec * 1000);
 
     claude.stdout.on('data', (data) => {
-        outputBuffer += data.toString();
+        if (outputBuffer.length < MAX_OUTPUT_SIZE) {
+            outputBuffer += data.toString();
+        }
     });
 
     claude.stderr.on('data', (data) => {
-        stderrBuffer += data.toString();
+        if (stderrBuffer.length < MAX_OUTPUT_SIZE) {
+            stderrBuffer += data.toString();
+        }
         console.error(`[MCP] Claude stderr: ${data.toString()}`);
     });
 
@@ -392,6 +410,9 @@ async function handleQueryClaude(id, args, res, req) {
                 console.error(`[MCP] Failed to clean up config: ${err.message}`);
             }
         }
+
+        if (responseSent) return;
+        responseSent = true;
 
         if (timedOut) {
             res.writeHead(408, { 'Content-Type': 'application/json' });
@@ -423,6 +444,9 @@ async function handleQueryClaude(id, args, res, req) {
         queryInProgress = false;
         console.error(`[MCP] Claude spawn error: ${err.message}`);
 
+        if (responseSent) return;
+        responseSent = true;
+
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(jsonRpcError(id, JSONRPC_ERRORS.INTERNAL_ERROR, err.message)));
     });
@@ -434,6 +458,7 @@ async function handleQueryClaude(id, args, res, req) {
             console.log('[MCP] Client disconnected, killing claude process');
             claude.kill('SIGTERM');
             queryInProgress = false;
+            responseSent = true;
         }
     });
 }
@@ -456,11 +481,10 @@ async function handleRequest(req, res) {
 
     // Login page (no auth required, served via Caddy reverse proxy)
     if (url.pathname === '/login' && req.method === 'GET') {
-        try {
-            const loginHtml = fs.readFileSync('/app/mcp-server/login.html', 'utf8');
+        if (loginHtmlCache) {
             res.writeHead(200, { 'Content-Type': 'text/html' });
-            res.end(loginHtml);
-        } catch {
+            res.end(loginHtmlCache);
+        } else {
             res.writeHead(500, { 'Content-Type': 'text/plain' });
             res.end('Login page not found');
         }
@@ -590,7 +614,7 @@ async function handleRequest(req, res) {
 
     // 404 for unknown paths
     res.writeHead(404, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Not Found' }));
+    res.end(JSON.stringify(jsonRpcError(null, JSONRPC_ERRORS.METHOD_NOT_FOUND, 'Not Found')));
 }
 
 const server = http.createServer((req, res) => {

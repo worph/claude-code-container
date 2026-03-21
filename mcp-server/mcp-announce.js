@@ -4,7 +4,6 @@
  */
 
 const dgram = require('dgram');
-const { execSync } = require('child_process');
 
 function createDiscoveryResponder({ name, description, tools, port = 9099, listenPort = 9099, auth, onDiscovery }) {
   const payload = { type: 'announce', name, description, tools, port };
