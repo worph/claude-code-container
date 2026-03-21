@@ -84,11 +84,6 @@ USER root
 
 ENV PATH="/home/claude/.local/bin:${PATH}"
 
-# Setup auth-proxy
-COPY auth-proxy /app/auth-proxy
-WORKDIR /app/auth-proxy
-RUN npm install --omit=dev && npm cache clean --force
-
 # Setup MCP server
 COPY mcp-server /app/mcp-server
 WORKDIR /app/mcp-server
@@ -103,12 +98,11 @@ RUN chmod +x /home/claude/scripts/*.sh && chown -R claude:claude /home/claude/sc
 
 WORKDIR /home/claude/workspace
 
-EXPOSE 8080
+EXPOSE 8080 9090
 
 ENV ANTHROPIC_API_KEY="" \
     AUTH_PASSWORD="" \
     PROXY_PORT=8080 \
-    TTYD_PORT=7681 \
     WETTY_PORT=3000 \
     MCP_PORT=9090 \
     MCP_ENABLED=true \
@@ -118,6 +112,6 @@ ENV ANTHROPIC_API_KEY="" \
     S6_BEHAVIOUR_IF_STAGE2_FAILS=2
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:${PROXY_PORT:-8080}/login || exit 1
+    CMD curl -f http://localhost:${PROXY_PORT:-8080}/ || exit 1
 
 ENTRYPOINT ["/init"]

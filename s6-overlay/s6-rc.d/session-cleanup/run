@@ -12,10 +12,9 @@ log() {
     echo "[session-cleanup] $*"
 }
 
-# Check if any clients are connected via auth-proxy WebSocket tracking
+# Check if any clients are connected via established TCP connections to ttyd
 has_ttyd_clients() {
-    # Use auth-proxy's internal endpoint which tracks active WebSocket connections
-    CONN_COUNT=$(curl -s http://localhost:8080/internal/ws-status 2>/dev/null | sed -n 's/.*"count":\([0-9]*\).*/\1/p')
+    CONN_COUNT=$(ss -tn state established sport = :${PROXY_PORT:-8080} | tail -n +2 | wc -l)
     CONN_COUNT="${CONN_COUNT:-0}"
     [ "$CONN_COUNT" -gt 0 ]
 }

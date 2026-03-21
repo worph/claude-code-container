@@ -6,7 +6,7 @@
 
 const http = require('http');
 
-const MCP_URL = process.env.MCP_URL || 'http://localhost:8080/mcp';
+const MCP_URL = process.env.MCP_URL || 'http://localhost:9090/mcp';
 const AUTH_TOKEN = process.env.MCP_AUTH_TOKEN || process.env.AUTH_PASSWORD || '';
 
 let pendingRequests = 0;
@@ -44,23 +44,17 @@ function sendRequest(jsonRpcRequest) {
         });
 
         res.on('end', () => {
-            // Try to parse as JSON first (standard response)
             try {
                 const data = JSON.parse(buffer);
                 process.stdout.write(JSON.stringify(data) + '\n');
             } catch (e) {
-                // Might be SSE format, try to parse it
-                const events = parseSSE(buffer);
-                for (const event of events) {
-                    if (event.event === 'message' || event.event === 'error') {
-                        try {
-                            const data = JSON.parse(event.data);
-                            process.stdout.write(JSON.stringify(data) + '\n');
-                        } catch (e2) {
-                            // Skip parse errors
-                        }
-                    }
-                }
+                // Non-JSON response - emit as error
+                const errorResponse = {
+                    jsonrpc: '2.0',
+                    id: jsonRpcRequest.id || null,
+                    error: { code: -32000, message: `Invalid response from server` }
+                };
+                process.stdout.write(JSON.stringify(errorResponse) + '\n');
             }
 
             pendingRequests--;
@@ -89,32 +83,6 @@ function sendRequest(jsonRpcRequest) {
 
     req.write(body);
     req.end();
-}
-
-function parseSSE(text) {
-    const events = [];
-    const blocks = text.split('\n\n');
-
-    for (const block of blocks) {
-        if (!block.trim()) continue;
-
-        const lines = block.split('\n');
-        let event = { event: 'message', data: '' };
-
-        for (const line of lines) {
-            if (line.startsWith('event: ')) {
-                event.event = line.substring(7).trim();
-            } else if (line.startsWith('data: ')) {
-                event.data += line.substring(6);
-            }
-        }
-
-        if (event.data) {
-            events.push(event);
-        }
-    }
-
-    return events;
 }
 
 function processLine(line) {

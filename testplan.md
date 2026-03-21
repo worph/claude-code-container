@@ -154,7 +154,7 @@ docker exec claude-code-app-dev pkill -9 -f abduco
 ## Architecture Notes
 
 ```
-Browser → Auth Proxy (:8080) → ttyd (:7681) → claude-session.sh → abduco → claude
+Browser → ttyd (:8080, basic auth) → claude-session.sh → abduco → claude
 ```
 
 - **abduco server**: Keeps Claude running when clients disconnect

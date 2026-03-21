@@ -1,5 +1,6 @@
 # Dev stack — start with: docker compose up -d --build
 # Container name: claude-code-app-dev (separate from production claude-code)
+# Caddy-docker-proxy handles authentication via Docker labels (mirrors production setup).
 
 services:
   claude-code-app-dev:
@@ -9,8 +10,8 @@ services:
     container_name: claude-code-app-dev
     hostname: claude
 
-    ports:
-      - "8080:8080"
+    # No ports exposed to host — only reachable via caddy
+    # MCP is still accessible from other containers on the docker network at claude-code-app-dev:9090
 
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
@@ -18,12 +19,27 @@ services:
       - CLAUDE_SESSION_TTL=1800
       - DISCOVERY_PORT=9099
 
+    labels:
+      caddy: ":8080"
+      # /login, /logout — no forward_auth, served by MCP server
+      caddy.0_handle: "/login*"
+      caddy.0_handle.reverse_proxy: "{{upstreams 9090}}"
+      caddy.1_handle: "/logout"
+      caddy.1_handle.reverse_proxy: "{{upstreams 9090}}"
+      # Everything else — forward_auth via MCP, then proxy to ttyd
+      caddy.2_handle: ""
+      caddy.2_handle.forward_auth: "{{upstreams 9090}}"
+      caddy.2_handle.forward_auth.uri: /auth
+      caddy.2_handle.forward_auth.@unauthorized.status: "401"
+      caddy.2_handle.forward_auth.handle_response: "@unauthorized"
+      caddy.2_handle.forward_auth.handle_response.redir: "* /login"
+      caddy.2_handle.reverse_proxy: "{{upstreams 8080}}"
+
     volumes:
       - workspace-dev:/home/claude/workspace
       - ./claude-config:/home/claude/.claude
       - ./claude-config/.claude.json:/home/claude/.claude.json
       # Bind-mount source for live editing
-      - ./auth-proxy:/home/claude/auth-proxy
       - ./mcp-server:/home/claude/mcp-server
       - ./scripts:/home/claude/scripts
       # Docker socket
@@ -35,13 +51,27 @@ services:
     cpus: 2.0
 
     networks:
+      - caddy-net
       - mcp-network
       - mcp-net
+
+  caddy:
+    image: lucaslorentz/caddy-docker-proxy:2.9-alpine
+    container_name: claude-code-caddy
+    ports:
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+    mem_limit: 64m
+    networks:
+      - caddy-net
 
 volumes:
   workspace-dev:
 
 networks:
+  caddy-net:
   mcp-network:
     external: true
   mcp-net:

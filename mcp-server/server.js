@@ -1,17 +1,44 @@
 const http = require('http');
+const crypto = require('crypto');
 const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 
 const PORT = process.env.MCP_PORT || 9090;
 const AUTH_PASSWORD = process.env.AUTH_PASSWORD || '';
-const WS_STATUS_URL = 'http://localhost:8080/internal/ws-status';
 const DEFAULT_MCP_WORKDIR = '/home/claude/workspace/mcp';
+
+// Session store for web login (cookie-based auth via Caddy forward_auth)
+const sessions = new Map(); // token -> { created }
+const SESSION_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+function createSession() {
+    const token = crypto.randomBytes(32).toString('hex');
+    sessions.set(token, { created: Date.now() });
+    return token;
+}
+
+function isValidSession(token) {
+    const session = sessions.get(token);
+    if (!session) return false;
+    if (Date.now() - session.created > SESSION_TTL) {
+        sessions.delete(token);
+        return false;
+    }
+    return true;
+}
+
+function parseCookies(req) {
+    const cookies = {};
+    const header = req.headers.cookie || '';
+    header.split(';').forEach(c => {
+        const [k, ...v] = c.trim().split('=');
+        if (k) cookies[k] = v.join('=');
+    });
+    return cookies;
+}
 
 // Track if a query is currently in progress
 let queryInProgress = false;
-
-// Track active queries with their metadata (for permission routing)
-const activeQueries = new Map(); // queryId -> { chatId, ... }
 
 // JSON-RPC error codes
 const JSONRPC_ERRORS = {
@@ -93,27 +120,18 @@ function jsonRpcResult(id, result) {
     };
 }
 
-// Check if browser WebSocket is connected via auth-proxy
+// Check if browser is connected by counting established TCP connections to ttyd port
 async function isBrowserConnected() {
-    return new Promise((resolve) => {
-        const req = http.get(WS_STATUS_URL, { timeout: 2000 }, (res) => {
-            let data = '';
-            res.on('data', chunk => data += chunk);
-            res.on('end', () => {
-                try {
-                    const status = JSON.parse(data);
-                    resolve(status.connected === true);
-                } catch {
-                    resolve(false);
-                }
-            });
-        });
-        req.on('error', () => resolve(false));
-        req.on('timeout', () => {
-            req.destroy();
-            resolve(false);
-        });
-    });
+    try {
+        const port = process.env.PROXY_PORT || 8080;
+        const result = execSync(
+            `ss -tn state established sport = :${port} | tail -n +2 | wc -l`,
+            { timeout: 2000, encoding: 'utf8' }
+        ).trim();
+        return parseInt(result, 10) > 0;
+    } catch {
+        return false;
+    }
 }
 
 // Parse JSON body from request
@@ -143,12 +161,6 @@ function isAuthorized(req) {
 
     const token = authHeader.substring(7);
     return token === AUTH_PASSWORD;
-}
-
-// Send SSE event
-function sendSSE(res, event, data) {
-    res.write(`event: ${event}\n`);
-    res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
 // Handle initialize method
@@ -430,6 +442,74 @@ async function handleRequest(req, res) {
         return;
     }
 
+    // Login page (no auth required, served via Caddy reverse proxy)
+    if (url.pathname === '/login' && req.method === 'GET') {
+        try {
+            const loginHtml = fs.readFileSync('/app/mcp-server/login.html', 'utf8');
+            res.writeHead(200, { 'Content-Type': 'text/html' });
+            res.end(loginHtml);
+        } catch {
+            res.writeHead(500, { 'Content-Type': 'text/plain' });
+            res.end('Login page not found');
+        }
+        return;
+    }
+
+    // Login form submission
+    if (url.pathname === '/login' && req.method === 'POST') {
+        let body;
+        try {
+            body = await parseJsonBody(req);
+        } catch {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Invalid JSON' }));
+            return;
+        }
+        if (AUTH_PASSWORD && body.password === AUTH_PASSWORD) {
+            const token = createSession();
+            res.writeHead(200, {
+                'Content-Type': 'application/json',
+                'Set-Cookie': `session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400`
+            });
+            res.end(JSON.stringify({ ok: true }));
+        } else {
+            res.writeHead(401, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Invalid password' }));
+        }
+        return;
+    }
+
+    // Auth check endpoint (used by Caddy forward_auth)
+    if (url.pathname === '/auth' && req.method === 'GET') {
+        // If no password configured, allow everything
+        if (!AUTH_PASSWORD) {
+            res.writeHead(200);
+            res.end();
+            return;
+        }
+        const cookies = parseCookies(req);
+        if (isValidSession(cookies.session)) {
+            res.writeHead(200);
+            res.end();
+        } else {
+            res.writeHead(401, { 'Content-Type': 'text/html' });
+            res.end('<html><head><meta http-equiv="refresh" content="0;url=/login"></head></html>');
+        }
+        return;
+    }
+
+    // Logout
+    if (url.pathname === '/logout' && req.method === 'GET') {
+        const cookies = parseCookies(req);
+        if (cookies.session) sessions.delete(cookies.session);
+        res.writeHead(302, {
+            'Set-Cookie': 'session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0',
+            'Location': '/login'
+        });
+        res.end();
+        return;
+    }
+
     // Status endpoint (no auth required, internal use)
     if (url.pathname === '/mcp/status' && req.method === 'GET') {
         const browserActive = await isBrowserConnected();
@@ -511,8 +591,8 @@ const server = http.createServer((req, res) => {
     });
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-    console.log(`[MCP] Server listening on 127.0.0.1:${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`[MCP] Server listening on 0.0.0.0:${PORT}`);
 
     // Beacon discovery
     const { createDiscoveryResponder } = require('./mcp-announce.js');
@@ -520,7 +600,7 @@ server.listen(PORT, '127.0.0.1', () => {
       name: 'claude-code',
       description: 'Claude Code agent — send prompts to Claude Code and get responses',
       tools: TOOLS,
-      port: 8080,
+      port: parseInt(process.env.MCP_PORT || '9090'),
       listenPort: parseInt(process.env.DISCOVERY_PORT || '9099'),
     };
     if (process.env.AUTH_PASSWORD) {

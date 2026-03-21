@@ -1,10 +1,15 @@
 #!/bin/bash
 # Session wrapper for Claude Code with abduco persistence
-# Multiple clients can attach to the same session (like tmux)
+# Decouples session creation from client attachment so that
+# ttyd killing the attach process does NOT kill claude.
+
+# Drop privileges to claude user if running as root (e.g. when called directly by ttyd)
+if [ "$(id -u)" = "0" ]; then
+    exec su - claude -c "$0"
+fi
 
 SESSION_NAME="claude-session"
 SOCKET_DIR="$HOME/.abduco"
-SOCKET_PATH="$SOCKET_DIR/${SESSION_NAME}@$(hostname)"
 
 cd /home/claude/workspace
 
@@ -44,12 +49,20 @@ session_is_alive() {
 }
 
 if session_is_alive; then
-    # Live session — attach as additional client
+    # Live session exists — just attach as a client
     trigger_redraw
     exec abduco -a "$SESSION_NAME"
 else
-    # No live session — clean up any stale sockets and start fresh
+    # No live session — clean up stale sockets and create a new one
     rm -f "$SOCKET_DIR"/${SESSION_NAME}@* 2>/dev/null
+
+    # Create session DETACHED — abduco server + claude run independently of this process
+    abduco -n "$SESSION_NAME" claude
+
+    # Brief wait for the socket to appear
+    sleep 0.3
+
+    # Now attach as a client — ttyd killing THIS process won't affect the session
     trigger_redraw
-    exec abduco -A "$SESSION_NAME" claude
+    exec abduco -a "$SESSION_NAME"
 fi

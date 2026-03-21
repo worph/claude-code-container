@@ -4,9 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Claude Code Container is a Docker-based application that provides a web-accessible terminal interface for Claude Code. It combines four components:
-- **ttyd**: Web terminal emulator
-- **Auth Proxy**: Node.js authentication layer (auth-proxy/server.js)
+Claude Code Container is a Docker-based application that provides a web-accessible terminal interface for Claude Code. It combines three components:
+- **ttyd**: Web terminal emulator (no built-in auth — authentication is handled externally by a reverse proxy)
 - **MCP Server**: Model Context Protocol server for programmatic access (mcp-server/server.js)
 - **Claude Code**: Anthropic's CLI tool
 
@@ -39,76 +38,72 @@ docker compose restart
 docker compose down
 ```
 
-- **Container name:** `claude-code-app-dev`
-- **Port:** `8080` (host) → `8080` (container)
-- **Docker network:** `mcp-network` (shared with telegram-mcp)
-- **MCP endpoint from other containers:** `http://claude-code-app-dev:8080/mcp`
-- **Bind-mounts:** `auth-proxy/`, `mcp-server/`, `scripts/` for live editing (no rebuild needed for JS/script changes, just restart the service)
+- **Container name:** `claude-code-app-dev` (+ `claude-code-caddy` sidecar)
+- **Ports:** `8080` (host) → Caddy → ttyd (basic auth), `9090` (host) → MCP server (Bearer auth)
+- **Docker networks:** `mcp-network` and `mcp-net` (both external, shared with telegram-mcp and beacon aggregator)
+- **MCP endpoint from other containers:** `http://claude-code-app-dev:9090/mcp`
+- **Bind-mounts:** `mcp-server/`, `scripts/` for live editing (no rebuild needed for JS/script changes, just restart the service)
 - **No test suite or linter** — there are no tests or linting configured for this project. Validate changes manually via the debugging commands below.
 
 ## Editing Node.js Code
 
-Both `auth-proxy/` and `mcp-server/` are plain CommonJS Node.js (no TypeScript, no build step). The only runtime dependency is `http-proxy` in auth-proxy; mcp-server has zero npm dependencies.
+`mcp-server/` is plain CommonJS Node.js (no TypeScript, no build step) with zero npm dependencies.
 
 To iterate on JS changes:
 1. Edit the file on the host (bind-mounted)
-2. Restart the specific service: `docker exec claude-code-app-dev s6-svc -r /run/service/<service-name>`
+2. Restart the specific service: `docker exec claude-code-app-dev s6-svc -r /run/service/mcp-server`
 3. Check logs: `docker compose logs -f`
 
 ## Architecture
 
 ```
-External (:8080)
-│
-▼
-┌─────────────────────────────────────────────────────────────┐
-│                      auth-proxy :8080                        │
-│                                                              │
-│  /login, /logout     →  session auth (cookie-based)         │
-│  /mcp/*              →  proxy to MCP server (Bearer auth)   │
-│  /*                  →  proxy to ttyd (WebSocket)           │
-│  /internal/ws-status →  WebSocket count (localhost only)    │
-└──────────────┬───────────────────────┬──────────────────────┘
-               │                       │
-    ┌──────────▼──────────┐ ┌──────────▼──────────┐
-    │     ttyd :7681      │ │  mcp-server :9090   │
-    │                     │ │  (runs as claude)   │
-    │  Interactive TTY    │ │                     │
-    │         │           │ │  JSON-RPC 2.0 API   │
-    │         ▼           │ │         │           │
-    │   claude-session.sh │ │         ▼           │
-    │         │           │ │  claude -p -c "..." │
-    │         ▼           │ │  (one-shot process) │
-    │      abduco         │ │                     │
-    │         │           │ │                     │
-    │         ▼           │ │                     │
-    │   claude (live)     │ │                     │
-    └──────────┬──────────┘ └──────────┬──────────┘
-               │                       │
-               └───────────┬───────────┘
-                           ▼
-              ~/.claude/projects/ (conversation history)
+Browser ──→ Caddy :8080 (basic auth) ──→ ttyd :8080 (no auth, internal)
+API     ──→ mcp-server :9090 (Bearer auth, JSON-RPC)
+
+┌─────────────────┐   ┌──────────────────────────┐  ┌──────────────────────────┐
+│  Caddy sidecar  │   │     ttyd :8080           │  │  mcp-server :9090        │
+│  (basic auth)   │──→│  (no auth, internal)     │  │  (Bearer auth)           │
+│  host :8080     │   │                          │  │                          │
+└─────────────────┘   │  Interactive TTY         │  │  JSON-RPC 2.0 API        │
+                      │         │                │  │         │                │
+                      │         ▼                │  │         ▼                │
+                      │   claude-session.sh      │  │  claude -p -c "..."      │
+                      │         │                │  │  (one-shot process)      │
+                      │         ▼                │  │                          │
+                      │      abduco              │  │                          │
+                      │         │                │  │                          │
+                      │         ▼                │  │                          │
+                      │   claude (live)          │  │                          │
+                      └──────────┬───────────────┘  └──────────┬───────────────┘
+                                 │                             │
+                                 └──────────┬──────────────────┘
+                                            ▼
+                               ~/.claude/projects/ (conversation history)
 ```
 
+**The container itself has no web authentication.** Auth is handled by an external reverse proxy:
+- **Dev stack:** Caddy sidecar in docker-compose (basic auth)
+- **Production:** External Caddy with Docker label plugin
+
 **Web UI Flow:**
-1. Browser connects to Auth Proxy on port 8080
-2. Auth Proxy validates session cookie or redirects to `/login`
-3. Authenticated requests proxy to ttyd on internal port 7681
+1. Browser connects to Caddy on host port 8080
+2. Caddy prompts for basic auth (username: `claude`, password: `AUTH_PASSWORD`)
+3. Caddy proxies to ttyd inside the container (no auth, internal only)
 4. ttyd provides terminal running Claude Code as the `claude` user
 5. Session persists via abduco for reconnection
 
 **MCP Flow:**
-1. External client sends JSON-RPC request to `/mcp` with Bearer token
-2. Auth Proxy validates token (AUTH_PASSWORD) and proxies to MCP server
+1. External client sends JSON-RPC request to `:9090/mcp` with Bearer token
+2. MCP server validates token (AUTH_PASSWORD)
 3. MCP server spawns `claude -p -c` process for each query
 4. Response streamed back as JSON-RPC result
 
 **Process Management (s6-overlay):**
 - s6-overlay manages all services with auto-restart
 - Service definitions in `s6-overlay/s6-rc.d/`
-- Startup order: `init-permissions` (oneshot) → `sshd` → `ttyd`, `auth-proxy`, `mcp-server`, `wetty`, `session-cleanup` (all longrun)
+- Startup order: `init-permissions` (oneshot) → `sshd` → `ttyd`, `mcp-server`, `wetty`, `session-cleanup` (all longrun)
 - Services run as `claude` user except sshd (root)
-- Two terminal backends exist: **ttyd** (direct PTY, port 7681) and **wetty** (SSH-based, port 3000). Auth proxy routes to ttyd by default.
+- Two terminal backends exist: **ttyd** (direct PTY, port 8080) and **wetty** (SSH-based, port 3000)
 - To modify a service: edit the `run` script in `s6-overlay/s6-rc.d/<service>/`, then rebuild or restart the service inside the container
 
 ## Debugging
@@ -123,12 +118,11 @@ docker exec claude-code-app-dev s6-rc -a list   # List services
 # Check MCP server directly (from inside container)
 docker exec claude-code-app-dev curl -s http://localhost:9090/mcp/status
 
-# Check WebSocket connections
-docker exec claude-code-app-dev curl -s http://localhost:8080/internal/ws-status
+# Check active browser connections
+docker exec claude-code-app-dev ss -tn state established sport = :8080
 
 # Restart a specific service inside container
 docker exec claude-code-app-dev s6-svc -r /run/service/mcp-server
-docker exec claude-code-app-dev s6-svc -r /run/service/auth-proxy
 docker exec claude-code-app-dev s6-svc -r /run/service/ttyd
 ```
 
@@ -162,13 +156,13 @@ When `query_claude` is called with a `chatId` parameter, Claude will request use
 
 ```bash
 # Test MCP is responding
-curl -X POST http://localhost:8080/mcp \
+curl -X POST http://localhost:9090/mcp \
   -H "Authorization: Bearer $AUTH_PASSWORD" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 
 # Send a query
-curl -X POST http://localhost:8080/mcp \
+curl -X POST http://localhost:9090/mcp \
   -H "Authorization: Bearer $AUTH_PASSWORD" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"query_claude","arguments":{"prompt":"ls","timeout":30}}}'
@@ -186,7 +180,7 @@ Add to `~/.claude.json` to use `mcp-client.js` as a stdio-to-HTTP bridge:
       "command": "node",
       "args": ["/path/to/mcp-client.js"],
       "env": {
-        "MCP_URL": "http://localhost:8080/mcp",
+        "MCP_URL": "http://localhost:9090/mcp",
         "MCP_AUTH_TOKEN": "your-auth-password"
       }
     }
@@ -206,31 +200,35 @@ Use MCP's `workdir` parameter to share history with web UI: `"workdir": "/home/c
 
 | File | Purpose |
 |------|---------|
-| `auth-proxy/server.js` | HTTP proxy: login/session (cookie), MCP routing (Bearer), WebSocket proxy to ttyd |
 | `mcp-server/server.js` | JSON-RPC 2.0 server, spawns `claude -p -c` processes, tracks query state |
 | `mcp-server/permission-mcp.js` | Stdio MCP server for permission prompts, forwards to telegram-mcp |
+| `mcp-server/mcp-announce.js` | UDP discovery responder for beacon protocol auto-registration |
 | `mcp-client.js` | Stdio-to-HTTP bridge for Claude Code MCP client integration |
 | `scripts/claude-session.sh` | abduco wrapper: kills existing clients, triggers SIGWINCH for redraw |
 | `s6-overlay/s6-rc.d/` | Service definitions (oneshot: init-permissions; longrun: others) |
 
 ## Authentication
 
-- **Web UI**: In-memory sessions (24h TTL), cookie `session=<id>; HttpOnly; SameSite=Strict`
-- **MCP**: `Authorization: Bearer <AUTH_PASSWORD>` header
-- **Both use the same `AUTH_PASSWORD`** environment variable
+- **Web UI**: No built-in auth — the container exposes ttyd without authentication. In the dev stack, a Caddy sidecar provides basic auth. In production, use an external reverse proxy (Caddy with Docker labels, Traefik, nginx, etc.).
+- **MCP**: `Authorization: Bearer <AUTH_PASSWORD>` header (self-authenticated)
+- `AUTH_PASSWORD` is used by Caddy (dev stack) and the MCP server
 
 ## Environment Variables
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `ANTHROPIC_API_KEY` | No | - | Claude API key. Leave empty for OAuth |
-| `AUTH_PASSWORD` | Yes | - | Password for web login and MCP Bearer token |
+| `AUTH_PASSWORD` | No | - | MCP Bearer token. Also used by Caddy sidecar (dev stack) for basic auth. |
 | `MCP_ENABLED` | No | `true` | Enable/disable MCP server for programmatic access |
 | `CLAUDE_SESSION_TTL` | No | `1800` | Seconds before disconnected sessions cleanup |
-| `PROXY_PORT` | No | `8080` | Auth proxy external port |
-| `TTYD_PORT` | No | `7681` | Internal ttyd port |
+| `PROXY_PORT` | No | `8080` | ttyd external port |
 | `WETTY_PORT` | No | `3000` | Internal wetty port |
 | `MCP_PORT` | No | `9090` | Internal MCP server port |
+| `DISCOVERY_PORT` | No | `9099` | UDP port for beacon auto-discovery (MCP server announces itself to aggregators) |
+
+## Beacon Auto-Discovery
+
+The MCP server includes a UDP discovery responder (`mcp-server/mcp-announce.js`) that responds to beacon protocol discovery requests. When an aggregator sends a UDP `discovery` message, the MCP server announces its tools and endpoint. On discovery, it automatically runs `claude mcp add beacon --transport http <url>` to register the discovered beacon as an MCP server for Claude Code sessions. Previously registered URLs are tracked in-memory to avoid duplicates.
 
 ## Data Persistence
 
@@ -242,7 +240,7 @@ volumes:
   - ./claude-config/.claude.json:/home/claude/.claude.json  # Session state
 ```
 
-Both `.claude/` and `.claude.json` must be mounted. Web login sessions are in-memory only (lost on restart).
+Both `.claude/` and `.claude.json` must be mounted.
 
 ## Container Details
 
@@ -265,7 +263,7 @@ docker pull ghcr.io/worph/claude-code-container:main
 ## Dockerfile Build Stages
 
 1. **builder** (node:22-bookworm): Compiles ttyd 1.7.7 from source
-2. **runtime** (node:22-slim): Installs s6-overlay, runtime deps, Docker CLI, wetty, abduco, Claude Code CLI, then copies auth-proxy and mcp-server with `npm install --omit=dev`
+2. **runtime** (node:22-slim): Installs s6-overlay, runtime deps, Docker CLI, wetty, abduco, Claude Code CLI, then copies mcp-server with `npm install --omit=dev`
 ## Error Codes (MCP)
 
 | Code | HTTP | Description |

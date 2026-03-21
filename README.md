@@ -1,13 +1,13 @@
 # Claude Code Container
 
-A Docker container that runs [Claude Code](https://github.com/anthropics/claude-code) (Anthropic's CLI for Claude) with [ttyd](https://github.com/tsl0922/ttyd) for web-based terminal access, plus an MCP server for programmatic access, all protected by authentication.
+A Docker container that runs [Claude Code](https://github.com/anthropics/claude-code) (Anthropic's CLI for Claude) with [ttyd](https://github.com/tsl0922/ttyd) for web-based terminal access (with built-in basic auth), plus an MCP server for programmatic access.
 
 ## Features
 
 - **Web Terminal** - Browser-based terminal access to Claude Code via ttyd
 - **MCP Server** - JSON-RPC API for programmatic access from other Claude instances
 - **Session Persistence** - Reconnect to your session via abduco
-- **Authentication** - Login page for web UI, Bearer token for MCP
+- **Authentication** - HTTP basic auth for web UI, Bearer token for MCP
 - **Multi-architecture** - Support for amd64 and arm64
 - **Persistent Storage** - Workspace and Claude config volumes
 - **Docker Access** - Optional Docker socket mounting
@@ -62,7 +62,7 @@ docker compose logs -f
 # Shell into dev container
 docker exec -it claude-code-app-dev bash
 
-# Restart after code changes (auth-proxy/, mcp-server/, scripts/ are bind-mounted)
+# Restart after code changes (mcp-server/, scripts/ are bind-mounted)
 docker compose restart
 
 # Tear down
@@ -75,14 +75,14 @@ docker compose down
 
 Both containers join `mcp-network`. From telegram-mcp, reach the dev container at:
 - **Hostname:** `claude-code-app-dev`
-- **MCP endpoint:** `http://claude-code-app-dev:8080/mcp`
+- **MCP endpoint:** `http://claude-code-app-dev:9090/mcp`
 
 Update telegram-mcp's `config.json` target URL accordingly:
 ```json
 {
   "target": {
     "transport": "http",
-    "url": "http://claude-code-app-dev:8080/mcp",
+    "url": "http://claude-code-app-dev:9090/mcp",
     "authToken": "<AUTH_PASSWORD from .env>"
   }
 }
@@ -91,36 +91,29 @@ Update telegram-mcp's `config.json` target URL accordingly:
 ## Architecture
 
 ```
-                    External (:8080)
-                          │
-                          ▼
-┌──────────────────────────────────────────────────────────────┐
-│                     auth-proxy :8080                          │
-│                                                               │
-│  /login, /logout  →  Web authentication (cookie session)     │
-│  /mcp/*           →  MCP API (Bearer token auth)             │
-│  /*               →  Terminal WebSocket proxy                 │
-└─────────────┬─────────────────────────────┬──────────────────┘
-              │                             │
-   ┌──────────▼──────────┐       ┌──────────▼──────────┐
-   │    ttyd :7681       │       │  mcp-server :9090   │
-   │                     │       │                     │
-   │  Web Terminal       │       │  JSON-RPC 2.0 API   │
-   │        │            │       │        │            │
-   │        ▼            │       │        ▼            │
-   │  claude (live)      │       │  claude -p -c "..." │
-   │  via abduco         │       │  (one-shot)         │
-   └──────────┬──────────┘       └──────────┬──────────┘
-              │                             │
-              └─────────────┬───────────────┘
-                            ▼
-               ~/.claude/projects/ (history)
-               /home/claude/workspace (files)
+Browser ──→ ttyd :8080 (basic auth, direct WebSocket)
+API     ──→ mcp-server :9090 (Bearer auth, JSON-RPC)
+
+   ┌──────────────────────┐       ┌──────────────────────┐
+   │    ttyd :8080        │       │  mcp-server :9090    │
+   │  (basic auth -c)     │       │  (Bearer auth)       │
+   │                      │       │                      │
+   │  Web Terminal        │       │  JSON-RPC 2.0 API    │
+   │        │             │       │        │             │
+   │        ▼             │       │        ▼             │
+   │  claude (live)       │       │  claude -p -c "..."  │
+   │  via abduco          │       │  (one-shot)          │
+   └──────────┬───────────┘       └──────────┬───────────┘
+              │                              │
+              └──────────┬───────────────────┘
+                         ▼
+              ~/.claude/projects/ (history)
+              /home/claude/workspace (files)
 ```
 
 **Two ways to interact:**
-- **Web Terminal**: Interactive session at `http://localhost:8080` (cookie auth)
-- **MCP Server**: Programmatic access at `http://localhost:8080/mcp` (Bearer token)
+- **Web Terminal**: Interactive session at `http://localhost:8080` (basic auth: `claude` / `AUTH_PASSWORD`)
+- **MCP Server**: Programmatic access at `http://localhost:9090/mcp` (Bearer token)
 
 ## MCP Server
 
@@ -143,7 +136,7 @@ Authorization: Bearer <AUTH_PASSWORD>
 
 ```bash
 # Send a prompt
-curl -X POST http://localhost:8080/mcp \
+curl -X POST http://localhost:9090/mcp \
   -H "Authorization: Bearer $AUTH_PASSWORD" \
   -H "Content-Type: application/json" \
   -d '{
@@ -172,7 +165,7 @@ Add to your `~/.claude.json`:
       "command": "node",
       "args": ["/path/to/mcp-client.js"],
       "env": {
-        "MCP_URL": "http://localhost:8080/mcp",
+        "MCP_URL": "http://localhost:9090/mcp",
         "MCP_AUTH_TOKEN": "your-auth-password"
       }
     }
@@ -204,10 +197,9 @@ To share history, specify `workdir` in your query:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `ANTHROPIC_API_KEY` | Anthropic API key (or leave empty for OAuth) | - |
-| `AUTH_PASSWORD` | Password for web login & MCP Bearer token | (required) |
+| `AUTH_PASSWORD` | Password for web login (basic auth) & MCP Bearer token | - |
 | `MCP_ENABLED` | Enable/disable MCP server | `true` |
-| `PROXY_PORT` | External auth proxy port | `8080` |
-| `TTYD_PORT` | Internal ttyd port | `7681` |
+| `PROXY_PORT` | ttyd external port | `8080` |
 | `WETTY_PORT` | Internal wetty port | `3000` |
 | `MCP_PORT` | Internal MCP server port | `9090` |
 | `CLAUDE_SESSION_TTL` | Session cleanup timeout (seconds) | `1800` |
@@ -283,8 +275,6 @@ services:
 ├── Dockerfile              # Container build
 ├── docker-compose.yml      # Compose configuration
 ├── .env.example            # Environment template
-├── auth-proxy/
-│   └── server.js           # Auth proxy with MCP routing
 ├── mcp-server/
 │   ├── server.js           # MCP JSON-RPC server
 │   └── permission-mcp.js   # Stdio MCP server for permission prompts
