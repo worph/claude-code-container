@@ -1,7 +1,8 @@
 #!/command/with-contenv sh
-# Session cleanup service - kills abduco sessions when no clients connected for > SESSION_TTL seconds
+# Session cleanup service - kills dtach sessions when no clients connected for > SESSION_TTL seconds
 
 STATE_FILE="/tmp/session-detached-since"
+SOCKET_PATH="/home/claude/.dtach/claude-session.sock"
 CHECK_INTERVAL=15
 
 # Default to 30 minutes if not set
@@ -18,16 +19,17 @@ has_ttyd_clients() {
     [ "$CONN_COUNT" -gt 0 ]
 }
 
-# Check if any abduco session exists
-has_abduco_session() {
-    su -s /bin/sh claude -c 'abduco -l 2>/dev/null | grep -qE "^[* ].*[0-9]+\s+\S+$"'
+# Check if a dtach session exists
+has_dtach_session() {
+    su -s /bin/sh claude -c "test -S $SOCKET_PATH" 2>/dev/null && \
+    pgrep -u claude -f "dtach.*claude-session" >/dev/null 2>&1
 }
 
 while true; do
     sleep "$CHECK_INTERVAL"
 
     # Check if any session exists
-    if ! has_abduco_session; then
+    if ! has_dtach_session; then
         rm -f "$STATE_FILE"
         continue
     fi
@@ -55,16 +57,19 @@ while true; do
             if [ "$ELAPSED" -ge "$SESSION_TTL" ]; then
                 log "Session exceeded TTL (${ELAPSED}s >= ${SESSION_TTL}s), terminating"
 
-                # Kill abduco server process (owned by claude user)
+                # Kill dtach server process (owned by claude user)
                 su -s /bin/sh claude -c '
-                    for pid in $(pgrep -u "$(id -u)" -f "abduco" 2>/dev/null); do
+                    for pid in $(pgrep -u "$(id -u)" -f "dtach" 2>/dev/null); do
                         ppid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d " ")
                         if [ "$ppid" = "1" ]; then
                             kill -TERM "$pid" 2>/dev/null
-                            echo "[session-cleanup] Killed abduco server (PID $pid)"
+                            echo "[session-cleanup] Killed dtach server (PID $pid)"
                         fi
                     done
                 '
+
+                # Clean up stale socket
+                rm -f "$SOCKET_PATH" 2>/dev/null
 
                 rm -f "$STATE_FILE"
             fi

@@ -1,15 +1,18 @@
 #!/bin/bash
-# Session wrapper for Claude Code with abduco persistence
+# Session wrapper for Claude Code with dtach persistence
 # Decouples session creation from client attachment so that
 # ttyd killing the attach process does NOT kill claude.
 
 
 export HOME=/home/claude
 
-SESSION_NAME="claude-session"
-SOCKET_DIR="$HOME/.abduco"
+SOCKET_DIR="$HOME/.dtach"
+SOCKET_PATH="$SOCKET_DIR/claude-session.sock"
 
 cd /home/claude/workspace
+
+# Ensure socket directory exists
+mkdir -p "$SOCKET_DIR"
 
 # Function to trigger redraw with multiple attempts
 trigger_redraw() {
@@ -38,29 +41,29 @@ trigger_redraw() {
     ) &
 }
 
-# Check if an abduco session is actually alive (not just a stale socket)
+# Check if a dtach session is actually alive (not just a stale socket)
 session_is_alive() {
-    # First check if abduco lists it (with timeout to avoid hanging on stale sockets)
-    timeout 2 abduco -l 2>/dev/null | grep -q "$SESSION_NAME" || return 1
-    # Verify the abduco server process is actually running
-    pgrep -u "$(id -u)" -f "abduco.*$SESSION_NAME" >/dev/null 2>&1 || return 1
+    # Socket file must exist
+    [ -S "$SOCKET_PATH" ] || return 1
+    # Verify a dtach process is actually running
+    pgrep -u "$(id -u)" -f "dtach.*claude-session" >/dev/null 2>&1 || return 1
 }
 
 if session_is_alive; then
     # Live session exists — just attach as a client
     trigger_redraw
-    exec abduco -a "$SESSION_NAME"
+    exec dtach -a "$SOCKET_PATH"
 else
     # No live session — clean up stale sockets and create a new one
-    rm -f "$SOCKET_DIR"/${SESSION_NAME}@* 2>/dev/null
+    rm -f "$SOCKET_PATH" 2>/dev/null
 
-    # Create session DETACHED — abduco server + claude run independently of this process
-    abduco -n "$SESSION_NAME" claude
+    # Create session DETACHED — dtach server + claude run independently of this process
+    dtach -n "$SOCKET_PATH" claude
 
     # Brief wait for the socket to appear
     sleep 0.3
 
     # Now attach as a client — ttyd killing THIS process won't affect the session
     trigger_redraw
-    exec abduco -a "$SESSION_NAME"
+    exec dtach -a "$SOCKET_PATH"
 fi

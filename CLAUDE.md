@@ -70,7 +70,7 @@ API     ──→ mcp-server :9090 (Bearer auth, JSON-RPC, docker network only)
                       │   claude-session.sh      │  │  claude -p -c "..."      │
                       │         │                │  │  (one-shot process)      │
                       │         ▼                │  │                          │
-                      │      abduco              │  │                          │
+                      │      dtach              │  │                          │
                       │         │                │  │                          │
                       │         ▼                │  │                          │
                       │   claude (live)          │  │                          │
@@ -92,7 +92,7 @@ API     ──→ mcp-server :9090 (Bearer auth, JSON-RPC, docker network only)
 4. On successful login, MCP server sets a session cookie and redirects to `/`
 5. Caddy proxies to ttyd inside the container (no auth, internal only)
 6. ttyd provides terminal running Claude Code as the `claude` user
-7. Session persists via abduco for reconnection
+7. Session persists via dtach for reconnection
 
 **MCP Flow:**
 1. External client sends JSON-RPC request to `:9090/mcp` with Bearer token
@@ -206,7 +206,7 @@ Use MCP's `workdir` parameter to share history with web UI: `"workdir": "/home/c
 | `mcp-server/mcp-announce.js` | UDP discovery responder for beacon protocol auto-registration |
 | `mcp-server/login.html` | Password-only login page served by MCP server for Caddy forward_auth flow |
 | `mcp-client.js` | Stdio-to-HTTP bridge for Claude Code MCP client integration |
-| `scripts/claude-session.sh` | abduco wrapper: kills existing clients, triggers SIGWINCH for redraw |
+| `scripts/claude-session.sh` | dtach wrapper: kills existing clients, triggers SIGWINCH for redraw |
 | `s6-overlay/s6-rc.d/` | Service definitions (oneshot: init-permissions; longrun: others) |
 
 ## Authentication
@@ -264,7 +264,7 @@ docker pull ghcr.io/worph/claude-code-container:main
 ## Dockerfile Build Stages
 
 1. **builder** (node:22-bookworm): Compiles ttyd 1.7.7 from source
-2. **runtime** (node:22-slim): Installs s6-overlay, runtime deps, Docker CLI, abduco, Claude Code CLI, then copies mcp-server with `npm install --omit=dev`
+2. **runtime** (node:22-slim): Installs s6-overlay, runtime deps, Docker CLI, dtach, Claude Code CLI, then copies mcp-server with `npm install --omit=dev`
 ## Error Codes (MCP)
 
 | Code | HTTP | Description |

@@ -56,13 +56,13 @@ RUN groupadd -g 999 docker || true && \
     mkdir -p /home/claude/workspace/mcp && \
     chown -R claude:claude /home/claude
 
-# Compile abduco for session persistence
+# Compile dtach for session persistence (no alternate screen buffer, preserves scrollback)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential procps \
-    && git clone --depth 1 https://github.com/martanne/abduco.git /tmp/abduco \
-    && cd /tmp/abduco \
-    && ./configure && make && make install \
-    && rm -rf /tmp/abduco \
+    && git clone --depth 1 https://github.com/crigler/dtach.git /tmp/dtach \
+    && cd /tmp/dtach \
+    && ./configure && make && cp dtach /usr/local/bin/ \
+    && rm -rf /tmp/dtach \
     && apt-get purge -y build-essential \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
