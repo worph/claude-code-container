@@ -276,6 +276,5 @@ docker pull ghcr.io/worph/claude-code-container:main
 | -32602 | 400 | Invalid params |
 | -32603 | 500 | Internal error |
 | -32001 | 401 | Unauthorized |
-| -32002 | 409 | Browser session active (if enabled) |
 | -32003 | 409 | Query already in progress |
 | -32004 | 408 | Query timeout |

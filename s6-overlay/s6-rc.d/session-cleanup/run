@@ -21,8 +21,8 @@ has_ttyd_clients() {
 
 # Check if a dtach session exists
 has_dtach_session() {
-    su -s /bin/sh claude -c "test -S $SOCKET_PATH" 2>/dev/null && \
-    pgrep -u claude -f "dtach.*claude-session" >/dev/null 2>&1
+    test -S "$SOCKET_PATH" && \
+    pgrep -f "dtach.*claude-session" >/dev/null 2>&1
 }
 
 while true; do
@@ -57,16 +57,14 @@ while true; do
             if [ "$ELAPSED" -ge "$SESSION_TTL" ]; then
                 log "Session exceeded TTL (${ELAPSED}s >= ${SESSION_TTL}s), terminating"
 
-                # Kill dtach server process (owned by claude user)
-                su -s /bin/sh claude -c '
-                    for pid in $(pgrep -u "$(id -u)" -f "dtach" 2>/dev/null); do
-                        ppid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d " ")
-                        if [ "$ppid" = "1" ]; then
-                            kill -TERM "$pid" 2>/dev/null
-                            echo "[session-cleanup] Killed dtach server (PID $pid)"
-                        fi
-                    done
-                '
+                # Kill dtach server process (the one with ppid=1, i.e. the session host)
+                for pid in $(pgrep -f "dtach.*claude-session" 2>/dev/null); do
+                    ppid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d " ")
+                    if [ "$ppid" = "1" ]; then
+                        kill -TERM "$pid" 2>/dev/null
+                        log "Killed dtach server (PID $pid)"
+                    fi
+                done
 
                 # Clean up stale socket
                 rm -f "$SOCKET_PATH" 2>/dev/null

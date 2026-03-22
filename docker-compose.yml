@@ -18,7 +18,7 @@ services:
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - AUTH_PASSWORD=${AUTH_PASSWORD}
-      - CLAUDE_SESSION_TTL=60
+      - CLAUDE_SESSION_TTL=30
       - DISCOVERY_PORT=9099
 
     labels:

@@ -1,6 +1,6 @@
 const http = require('http');
 const crypto = require('crypto');
-const { spawn, execSync, execFileSync } = require('child_process');
+const { spawn, execFileSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
@@ -115,7 +115,7 @@ const TOOLS = [
     },
     {
         name: 'check_status',
-        description: 'Check if Claude Code in the container is available for queries. Returns availability status and whether a browser session is active.',
+        description: 'Check if Claude Code in the container is available for queries. Returns availability status and whether a query is in progress.',
         inputSchema: {
             type: 'object',
             properties: {}
@@ -137,20 +137,6 @@ function jsonRpcResult(id, result) {
         id: id,
         result: result
     };
-}
-
-// Check if browser is connected by counting established TCP connections to ttyd port
-async function isBrowserConnected() {
-    try {
-        const port = process.env.PROXY_PORT || 8080;
-        const result = execSync(
-            `ss -tn state established sport = :${port} | tail -n +2 | wc -l`,
-            { timeout: 2000, encoding: 'utf8' }
-        ).trim();
-        return parseInt(result, 10) > 0;
-    } catch {
-        return false;
-    }
 }
 
 // Parse JSON body from request
@@ -212,12 +198,10 @@ async function handleToolsCall(id, params, res, req) {
     const args = params?.arguments || {};
 
     if (toolName === 'check_status') {
-        const browserActive = await isBrowserConnected();
         const content = [{
             type: 'text',
             text: JSON.stringify({
-                available: !browserActive && !queryInProgress,
-                browserConnected: browserActive,
+                available: !queryInProgress,
                 queryInProgress: queryInProgress
             }, null, 2)
         }];
@@ -548,11 +532,9 @@ async function handleRequest(req, res) {
 
     // Status endpoint (no auth required, internal use)
     if (url.pathname === '/mcp/status' && req.method === 'GET') {
-        const browserActive = await isBrowserConnected();
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
-            available: !browserActive && !queryInProgress,
-            browserConnected: browserActive,
+            available: !queryInProgress,
             queryInProgress: queryInProgress
         }));
         return;
