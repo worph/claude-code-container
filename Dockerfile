@@ -69,7 +69,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install Claude Code
 USER claude
-RUN curl -fsSL https://claude.ai/install.sh | bash
+RUN curl -fsSL https://claude.ai/install.sh | bash && \
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> /home/claude/.bashrc
 USER root
 
 ENV PATH="/home/claude/.local/bin:${PATH}"

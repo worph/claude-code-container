@@ -104,7 +104,7 @@ API     ──→ mcp-server :9090 (Bearer auth, JSON-RPC, docker network only)
 - s6-overlay manages all services with auto-restart
 - Service definitions in `s6-overlay/s6-rc.d/`
 - Startup order: `init-permissions` (oneshot) → `ttyd`, `mcp-server`, `session-cleanup` (all longrun)
-- Services run as `claude` user
+- Services run as root (for administrative access: Docker socket, package installs, etc.). `HOME` is set to `/home/claude` in `claude-session.sh` so Claude Code finds its config and credentials on the bind-mounted volume.
 - To modify a service: edit the `run` script in `s6-overlay/s6-rc.d/<service>/`, then rebuild or restart the service inside the container
 
 ## Debugging
@@ -245,7 +245,7 @@ Both `.claude/` and `.claude.json` must be mounted.
 
 ## Container Details
 
-- User: `claude` (auto-assigned UID), member of `docker` group (GID 999)
+- User: **root** — the container runs as root for administrative purposes (Docker socket access, package management, system-level operations). `HOME` is explicitly set to `/home/claude` in `claude-session.sh` so Claude Code uses the bind-mounted config directory for auth and history persistence.
 - Workdir: `/home/claude/workspace`, MCP: `/home/claude/workspace/mcp`
 - Memory: limited to 1GB, Node heap limited to 64MB (`NODE_OPTIONS="--max-old-space-size=64"`)
 

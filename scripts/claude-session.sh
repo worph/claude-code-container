@@ -4,6 +4,8 @@
 # ttyd killing the attach process does NOT kill claude.
 
 
+export HOME=/home/claude
+
 SESSION_NAME="claude-session"
 SOCKET_DIR="$HOME/.abduco"
 
