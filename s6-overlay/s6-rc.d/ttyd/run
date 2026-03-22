@@ -4,4 +4,4 @@ exec ttyd -W -p "${PROXY_PORT:-8080}" \
     -t "theme={'background':'#1e1e1e','foreground':'#d4d4d4'}" \
     -t reconnect=3 \
     -P 30 \
-    su - claude -c "/home/claude/scripts/claude-session.sh"
+    /home/claude/scripts/claude-session.sh

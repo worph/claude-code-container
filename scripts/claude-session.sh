@@ -3,10 +3,6 @@
 # Decouples session creation from client attachment so that
 # ttyd killing the attach process does NOT kill claude.
 
-# Drop privileges to claude user if running as root (e.g. when called directly by ttyd)
-if [ "$(id -u)" = "0" ]; then
-    exec su - claude -c "$0"
-fi
 
 SESSION_NAME="claude-session"
 SOCKET_DIR="$HOME/.abduco"
