@@ -30,7 +30,7 @@ RUN tar -C / -Jxpf /tmp/s6-overlay-noarch.tar.xz && \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libjson-c5 libwebsockets17 libwebsockets-evlib-uv libuv1 \
     git curl vim ca-certificates sudo jq htop \
-    dnsutils iproute2 iputils-ping traceroute lsof \
+    dnsutils iproute2 iputils-ping traceroute lsof openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Install yq
