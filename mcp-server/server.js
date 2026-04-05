@@ -1,6 +1,6 @@
 const http = require('http');
 const crypto = require('crypto');
-const { spawn, execFileSync } = require('child_process');
+const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
@@ -623,34 +623,6 @@ server.listen(PORT, '0.0.0.0', () => {
     if (process.env.AUTH_PASSWORD) {
       discoverOpts.auth = { type: 'bearer', token: process.env.AUTH_PASSWORD };
     }
-
-    // Track registered beacon URLs to avoid re-running `claude mcp add`
-    const registeredBeacons = new Set();
-
-    discoverOpts.onDiscovery = ({ mcp_url }) => {
-      if (!mcp_url || registeredBeacons.has(mcp_url)) return;
-      // Validate mcp_url is a real http(s) URL before passing to exec
-      try {
-        const parsed = new URL(mcp_url);
-        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return;
-      } catch { return; }
-      console.log(`[MCP] Beacon discovered with mcp_url: ${mcp_url}, registering...`);
-      try {
-        execFileSync(
-          'claude',
-          ['mcp', 'add', 'beacon', '--transport', 'http', mcp_url],
-          {
-            env: { ...process.env, HOME: '/home/claude', USER: 'claude' },
-            stdio: 'pipe',
-            timeout: 10000,
-          }
-        );
-        registeredBeacons.add(mcp_url);
-        console.log(`[MCP] Beacon registered successfully: ${mcp_url}`);
-      } catch (err) {
-        console.error(`[MCP] Failed to register beacon: ${err.message}`);
-      }
-    };
 
     createDiscoveryResponder(discoverOpts);
 });

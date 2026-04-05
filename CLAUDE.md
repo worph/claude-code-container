@@ -203,7 +203,7 @@ Use MCP's `workdir` parameter to share history with web UI: `"workdir": "/home/c
 |------|---------|
 | `mcp-server/server.js` | JSON-RPC 2.0 server, spawns `claude -p -c` processes, tracks query state |
 | `mcp-server/permission-mcp.js` | Stdio MCP server for permission prompts, forwards to telegram-mcp |
-| `mcp-server/mcp-announce.js` | UDP discovery responder for beacon protocol auto-registration |
+| `mcp-server/mcp-announce.js` | UDP discovery responder for beacon protocol |
 | `mcp-server/login.html` | Password-only login page served by MCP server for Caddy forward_auth flow |
 | `mcp-client.js` | Stdio-to-HTTP bridge for Claude Code MCP client integration |
 | `scripts/claude-session.sh` | dtach wrapper: kills existing clients, triggers SIGWINCH for redraw |
@@ -229,7 +229,7 @@ Use MCP's `workdir` parameter to share history with web UI: `"workdir": "/home/c
 
 ## Beacon Auto-Discovery
 
-The MCP server includes a UDP discovery responder (`mcp-server/mcp-announce.js`) that responds to beacon protocol discovery requests. When an aggregator sends a UDP `discovery` message, the MCP server announces its tools and endpoint. On discovery, it automatically runs `claude mcp add beacon --transport http <url>` to register the discovered beacon as an MCP server for Claude Code sessions. Previously registered URLs are tracked in-memory to avoid duplicates.
+The MCP server includes a UDP discovery responder (`mcp-server/mcp-announce.js`) that responds to beacon protocol discovery requests. When an aggregator sends a UDP `discovery` message, the MCP server announces its tools and endpoint.
 
 ## Data Persistence
 

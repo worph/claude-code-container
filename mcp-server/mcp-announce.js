@@ -5,7 +5,7 @@
 
 const dgram = require('dgram');
 
-function createDiscoveryResponder({ name, description, tools, port = 9099, listenPort = 9099, auth, onDiscovery }) {
+function createDiscoveryResponder({ name, description, tools, port = 9099, listenPort = 9099, auth }) {
   const payload = { type: 'announce', name, description, tools, port };
   if (auth) payload.auth = auth;
   const manifest = JSON.stringify(payload);
@@ -18,9 +18,6 @@ function createDiscoveryResponder({ name, description, tools, port = 9099, liste
       if (msg.type === 'discovery') {
         console.log(`Discovery request from ${rinfo.address}:${rinfo.port}, announcing`);
         socket.send(manifest, rinfo.port, rinfo.address);
-        if (onDiscovery) {
-          onDiscovery({ mcp_url: msg.mcp_url || null });
-        }
       }
     } catch {
       // ignore malformed messages
