@@ -326,12 +326,11 @@ async function handleQueryClaude(id, args, res, req) {
 
     console.log(`[MCP] Starting query (timeout: ${timeoutSec}s, workdir: ${workdir}, permissions: ${enablePermissionPrompts}, allowedTools: [${permission.join(', ')}]): claude ${cmdArgs.slice(0, -1).join(' ')} '${prompt.substring(0, 50)}'...`);
 
-    // Build environment
+    // Build environment (HOME/USER needed because s6-setuidgid doesn't set env vars)
     const env = {
         ...process.env,
         HOME: '/home/claude',
         USER: 'claude',
-        PATH: '/home/claude/.local/bin:' + (process.env.PATH || '')
     };
 
     // Spawn claude directly (MCP server runs as claude user)
@@ -641,7 +640,7 @@ server.listen(PORT, '0.0.0.0', () => {
           'claude',
           ['mcp', 'add', 'beacon', '--transport', 'http', mcp_url],
           {
-            env: { ...process.env, HOME: '/home/claude', USER: 'claude', PATH: '/home/claude/.local/bin:' + (process.env.PATH || '') },
+            env: { ...process.env, HOME: '/home/claude', USER: 'claude' },
             stdio: 'pipe',
             timeout: 10000,
           }

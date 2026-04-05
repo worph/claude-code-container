@@ -104,7 +104,7 @@ API     ──→ mcp-server :9090 (Bearer auth, JSON-RPC, docker network only)
 - s6-overlay manages all services with auto-restart
 - Service definitions in `s6-overlay/s6-rc.d/`
 - Startup order: `init-permissions` (oneshot) → `ttyd`, `mcp-server`, `session-cleanup` (all longrun)
-- Services run as root (for administrative access: Docker socket, package installs, etc.). `HOME` is set to `/home/claude` in `claude-session.sh` so Claude Code finds its config and credentials on the bind-mounted volume.
+- Services run as the `claude` user (dropped via `s6-setuidgid`). The `claude` user has passwordless sudo for admin tasks (Docker, package installs). `HOME` is explicitly set in session scripts because `s6-setuidgid` does not modify environment variables.
 - To modify a service: edit the `run` script in `s6-overlay/s6-rc.d/<service>/`, then rebuild or restart the service inside the container
 
 ## Debugging
@@ -245,7 +245,7 @@ Both `.claude/` and `.claude.json` must be mounted.
 
 ## Container Details
 
-- User: **root** — the container runs as root for administrative purposes (Docker socket access, package management, system-level operations). `HOME` is explicitly set to `/home/claude` in `claude-session.sh` so Claude Code uses the bind-mounted config directory for auth and history persistence.
+- User: **claude** — all services run as the `claude` user (s6-overlay PID 1 runs as root, services drop privileges via `s6-setuidgid`). The `claude` user has passwordless sudo and docker group membership for admin tasks. `HOME` is explicitly set in session scripts because `s6-setuidgid` does not modify environment variables.
 - Workdir: `/home/claude/workspace`, MCP: `/home/claude/workspace/mcp`
 - Memory: limited to 1GB, Node heap limited to 64MB (`NODE_OPTIONS="--max-old-space-size=64"`)
 

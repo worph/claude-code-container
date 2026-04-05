@@ -1,5 +1,6 @@
 #!/command/with-contenv sh
-exec ttyd -W -p "${PROXY_PORT:-8080}" \
+exec s6-setuidgid claude \
+    ttyd -W -p "${PROXY_PORT:-8080}" \
     -t fontSize=14 \
     -t "theme={'background':'#1e1e1e','foreground':'#d4d4d4'}" \
     -t reconnect=3 \

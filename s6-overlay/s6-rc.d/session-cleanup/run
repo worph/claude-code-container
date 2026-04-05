@@ -1,4 +1,9 @@
 #!/command/with-contenv sh
+# Drop to claude user (dtach/claude processes run as claude)
+if [ "$(id -u)" = "0" ]; then
+    exec s6-setuidgid claude "$0" "$@"
+fi
+
 # Session cleanup service - kills dtach sessions when no clients connected for > SESSION_TTL seconds
 
 STATE_FILE="/tmp/session-detached-since"

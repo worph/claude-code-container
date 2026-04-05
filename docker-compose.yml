@@ -9,8 +9,8 @@ services:
       dockerfile: Dockerfile
     container_name: claude-code-app-dev
     hostname: claude
-    # Runs as root for administrative access (Docker socket, package installs, etc.)
-    # HOME is set to /home/claude in claude-session.sh so Claude Code finds its config
+    # All services run as claude user (with passwordless sudo for admin tasks)
+    # s6-overlay PID 1 runs as root; services drop to claude via s6-setuidgid
 
     # No ports exposed to host — only reachable via caddy
     # MCP is still accessible from other containers on the docker network at claude-code-app-dev:9090

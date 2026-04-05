@@ -53,6 +53,8 @@ COPY --from=builder /usr/local/bin/ttyd /usr/local/bin/ttyd
 # Create user (password set at runtime by init-permissions)
 RUN groupadd -g 999 docker || true && \
     useradd -m -s /bin/bash -G docker claude && \
+    echo 'claude ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/claude && \
+    chmod 0440 /etc/sudoers.d/claude && \
     mkdir -p /home/claude/workspace/mcp && \
     chown -R claude:claude /home/claude
 
