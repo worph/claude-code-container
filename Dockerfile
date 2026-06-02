@@ -99,7 +99,7 @@ ENV ANTHROPIC_API_KEY="" \
     MCP_PORT=9090 \
     MCP_ENABLED=true \
     CLAUDE_SESSION_TTL=1800 \
-    NODE_OPTIONS="--max-old-space-size=64" \
+    NODE_OPTIONS="--max-old-space-size=4096" \
     S6_KEEP_ENV=1 \
     S6_BEHAVIOUR_IF_STAGE2_FAILS=2
 
