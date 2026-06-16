@@ -221,7 +221,7 @@ Use MCP's `workdir` parameter to share history with web UI: `"workdir": "/home/c
 |----------|----------|---------|-------------|
 | `ANTHROPIC_API_KEY` | No | - | Claude API key. Leave empty for OAuth |
 | `AUTH_PASSWORD` | No | - | MCP Bearer token. Also used by MCP server's login page and Caddy forward_auth (dev stack). |
-| `MCP_ENABLED` | No | `true` | Enable/disable MCP server for programmatic access |
+| `MCP_ENABLED` | No | `true` | Enable/disable the JSON-RPC `/mcp` automation endpoint + beacon discovery. The 9090 server (web auth: `/login`, `/auth`, `/logout`) ALWAYS runs regardless — this flag does NOT gate login. Set `false` to serve only the auth/terminal layer. |
 | `CLAUDE_SESSION_TTL` | No | `1800` | Seconds before disconnected sessions cleanup |
 | `PROXY_PORT` | No | `8080` | ttyd external port |
 | `MCP_PORT` | No | `9090` | Internal MCP server port |
@@ -269,7 +269,7 @@ docker pull ghcr.io/worph/claude-code-container:main
 
 | Code | HTTP | Description |
 |------|------|-------------|
-| - | 503 | MCP server is disabled (MCP_ENABLED=false) |
+| -32601 | 404 | MCP endpoint is disabled (MCP_ENABLED=false) — auth layer still served |
 | -32700 | 400 | Parse error - invalid JSON |
 | -32600 | 400 | Invalid request |
 | -32601 | 404 | Method not found |

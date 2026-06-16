@@ -9,6 +9,12 @@ const AUTH_PASSWORD = process.env.AUTH_PASSWORD || '';
 const DEFAULT_MCP_WORKDIR = '/home/claude/workspace/mcp';
 const MAX_OUTPUT_SIZE = 5 * 1024 * 1024; // 5MB buffer limit per query
 
+// MCP automation endpoint toggle. IMPORTANT: this 9090 server ALWAYS serves the
+// web auth layer (/login, /auth, /logout) that Caddy forward_auth depends on, so
+// the process must always run. This flag only gates the JSON-RPC /mcp endpoint
+// and beacon discovery — never the auth layer.
+const MCP_ENABLED = process.env.MCP_ENABLED === 'true' || process.env.MCP_ENABLED === '1';
+
 // Cache login page at startup
 let loginHtmlCache = null;
 try {
@@ -534,7 +540,8 @@ async function handleRequest(req, res) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
             available: !queryInProgress,
-            queryInProgress: queryInProgress
+            queryInProgress: queryInProgress,
+            mcpEnabled: MCP_ENABLED
         }));
         return;
     }
@@ -548,6 +555,13 @@ async function handleRequest(req, res) {
 
     // Main MCP endpoint
     if (url.pathname === '/mcp' && req.method === 'POST') {
+        // MCP automation can be disabled (e.g. on the privileged admin app)
+        // without affecting the web auth layer served above.
+        if (!MCP_ENABLED) {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(jsonRpcError(null, JSONRPC_ERRORS.METHOD_NOT_FOUND, 'MCP endpoint is disabled (set MCP_ENABLED=true to enable)')));
+            return;
+        }
         let body;
         try {
             body = await parseJsonBody(req);
@@ -609,7 +623,13 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-    console.log(`[MCP] Server listening on 0.0.0.0:${PORT}`);
+    console.log(`[MCP] Server listening on 0.0.0.0:${PORT} (auth layer always on; MCP endpoint ${MCP_ENABLED ? 'ENABLED' : 'DISABLED'})`);
+
+    // When MCP is disabled, serve only the auth layer — do not expose the /mcp
+    // endpoint (handled above) or announce the agent to beacon discovery.
+    if (!MCP_ENABLED) {
+        return;
+    }
 
     // Beacon discovery
     const { createDiscoveryResponder } = require('./mcp-announce.js');

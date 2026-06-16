@@ -198,7 +198,7 @@ To share history, specify `workdir` in your query:
 |----------|-------------|---------|
 | `ANTHROPIC_API_KEY` | Anthropic API key (or leave empty for OAuth) | - |
 | `AUTH_PASSWORD` | Password for web login (session auth) & MCP Bearer token | - |
-| `MCP_ENABLED` | Enable/disable MCP server | `true` |
+| `MCP_ENABLED` | Enable/disable the `/mcp` automation endpoint (web login/auth always runs) | `true` |
 | `PROXY_PORT` | ttyd external port | `8080` |
 | `WETTY_PORT` | Internal wetty port | `3000` |
 | `MCP_PORT` | Internal MCP server port | `9090` |

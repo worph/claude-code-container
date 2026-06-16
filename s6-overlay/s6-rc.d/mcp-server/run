@@ -1,11 +1,8 @@
 #!/command/with-contenv sh
 
-# Check if MCP is enabled
-if [ "$MCP_ENABLED" != "true" ] && [ "$MCP_ENABLED" != "1" ]; then
-    echo "[MCP] MCP server is disabled (MCP_ENABLED=${MCP_ENABLED:-unset})"
-    # Sleep forever to keep the service "running" but inactive
-    exec sleep infinity
-fi
-
+# This server ALWAYS runs: besides the JSON-RPC /mcp endpoint it also serves the
+# web auth layer (/login, /auth, /logout) that Caddy forward_auth depends on, so
+# gating the whole process on MCP_ENABLED would break login. The MCP_ENABLED flag
+# is honored inside server.js, where it gates only the /mcp endpoint + discovery.
 cd /app/mcp-server
 exec s6-setuidgid claude node server.js
