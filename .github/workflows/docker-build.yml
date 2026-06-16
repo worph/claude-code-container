@@ -63,4 +63,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # ignore-error keeps the build green when GitHub's Actions Cache
+          # backend flakes on export (e.g. "error writing layer blob: not_found").
+          # The image is already pushed by this point; only caching is affected.
+          cache-to: type=gha,mode=max,ignore-error=true
